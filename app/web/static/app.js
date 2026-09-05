@@ -138,6 +138,7 @@ const state = {
   cutSelection: new Set(),  // 去词勾选的命中 id
   activeCut: null,          // 进行中的去词任务 {videoId, jobId}
   modelReady: null,         // 识别模型是否就绪（首启下载拦截依据）
+  availableModels: [],      // 本地已下载的模型名（设置页标注"已下载"）
 };
 
 /* ========================= 页签切换 ========================= */
@@ -899,6 +900,14 @@ async function loadSettings() {
   $("#setTheme").value = s.theme || "system";
   $("#setHfEndpoint").value = s.hf_endpoint || "";
   if (s.theme) applyTheme(s.theme);  // 以服务端设置为准（首次打开无 localStorage 时也正确）
+
+  // 标注本地已下载的模型，避免用户以为切换模型都要重新下载
+  const avail = state.availableModels || [];
+  Array.from($("#setModel").options).forEach((opt) => {
+    const base = opt.textContent.replace(/\s*（已下载）.*/, "").trim();
+    const label = avail.includes(opt.value) ? `${base}（已下载）` : base;
+    if (opt.textContent !== label) opt.textContent = label;
+  });
 }
 
 $("#setTheme").addEventListener("change", (e) => applyTheme(e.target.value));
@@ -923,6 +932,7 @@ $("#btnSaveSettings").addEventListener("click", async () => {
 async function refreshStatus() {
   try {
     const s = await api("GET", "/api/status");
+    state.availableModels = s.available_models || [];
     // 版本号标注到顶栏（服务端下发，保持唯一数据源）
     if (s.version) $("#appVer").textContent = " v" + s.version;
     // 首启模型下载界面（展示文件/大小/进度，并用"禁用拖入区"+后端拦截避免过早拖入）

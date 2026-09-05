@@ -175,10 +175,18 @@ def any_model_ready() -> bool:
     """本地是否已有任意一个完整模型（用于区分"首次使用"与"切换模型"）。"""
     if not LOCAL_MODELS.is_dir():
         return False
+    return bool(available_models())
+
+
+def available_models() -> list[str]:
+    """本地已就绪（含 model.bin）的模型名列表，用于界面标注"已下载"。"""
+    if not LOCAL_MODELS.is_dir():
+        return []
+    names = []
     for d in LOCAL_MODELS.iterdir():
         if d.is_dir() and (d / "model.bin").is_file():
-            return True
-    return False
+            names.append(d.name)
+    return sorted(names)
 
 
 def _fetch_file_sizes(base: str, name: str) -> dict[str, int]:
