@@ -49,21 +49,41 @@ class TaskManager:
 
     # ------------------------------------------------------------------
     def _start_model_predownload(self) -> None:
-        """首次启动若本地缺模型，自动从国内源后台下载（全自动，无需用户操作）。"""
+        """首次启动若本地缺模型，自动从国内源后台下载（全自动，无需用户操作）。
+
+        下载状态通过 state_cb 丰富为"每文件详情 + 进度"，供前端首启界面展示与拦截拖入。
+        """
         name = self.settings.get("model", "large-v3")
         if self.engine.is_model_ready(name):
             return
 
-        self._dl_state = {"active": True, "name": name, "frac": 0.0}
+        # 初始状态：文件清单（本地存在标记），供前端立即渲染
+        try:
+            from core.model_downloader import _initial_files
+            files = _initial_files(name)
+        except Exception:  # noqa: BLE001
+            files = []
+        self._dl_state = {
+            "active": True, "name": name, "frac": 0.0, "overall": 0.0,
+            "current_file": None, "file_index": -1,
+            "file_count": len(files), "file_progress": 0.0,
+            "files": files, "source": None,
+        }
 
         def _run() -> None:
+            def on_state(st: dict) -> None:
+                # 合并"活跃/错误"字段，其余用下载器下发的每文件详情
+                st.setdefault("active", True)
+                self._dl_state = st
+
             def on_p(frac: float) -> None:
                 self._dl_state["frac"] = frac
 
             try:
                 log.info("本地缺少模型 %s，开始自动下载（国内源，断点续传）", name)
-                self.engine.ensure_model(name, progress=on_p)
+                self.engine.ensure_model(name, progress=on_p, state_cb=on_state)
                 self._dl_state["frac"] = 1.0
+                self._dl_state["overall"] = 1.0
                 log.info("模型 %s 自动下载完成", name)
             except Exception as e:  # noqa: BLE001
                 self._dl_error = str(e)[:300]

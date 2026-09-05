@@ -279,10 +279,10 @@ namespace LanJinCiLauncher
             catch (Exception) { return false; }
         }
 
-        internal static bool PostScanPaths(IList<string> paths)
+        internal static string PostScanPaths(IList<string> paths)
         {
             int port = FindServerPort();
-            if (port <= 0) return false;
+            if (port <= 0) return "服务未就绪或已停止，请重新打开软件或从托盘右键「重启服务」。";
             try
             {
                 var payload = new StringBuilder();
@@ -303,10 +303,32 @@ namespace LanJinCiLauncher
                 using (var s = req.GetRequestStream()) s.Write(body, 0, body.Length);
                 using (var resp = (HttpWebResponse)req.GetResponse())
                 {
-                    return resp.StatusCode == HttpStatusCode.OK;
+                    if (resp.StatusCode == HttpStatusCode.OK) return "";
+                    // 读取服务端返回的 detail（如"模型尚未下载完成"），给用户明确原因
+                    string detail = "";
+                    try
+                    {
+                        using (var reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                        {
+                            string json = reader.ReadToEnd();
+                            // 简单解析 {"detail": "..."}
+                            int i = json.IndexOf("\"detail\"");
+                            if (i >= 0)
+                            {
+                                int q1 = json.IndexOf('"', i + 8);
+                                if (q1 >= 0)
+                                {
+                                    int q2 = json.IndexOf('"', q1 + 1);
+                                    if (q2 > q1) detail = json.Substring(q1 + 1, q2 - q1 - 1);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception) { }
+                    return string.IsNullOrEmpty(detail) ? "提交失败（服务返回错误），请稍后重试。" : detail;
                 }
             }
-            catch (Exception) { return false; }
+            catch (Exception) { return "提交失败：网络异常或服务不可用，请稍后重试。"; }
         }
 
         private static string EscJson(string s)
@@ -874,15 +896,15 @@ namespace LanJinCiLauncher
                     Program_AppTitle(), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            bool ok = Program.PostScanPaths(media);
-            if (ok)
+            string err = Program.PostScanPaths(media);
+            if (err.Length == 0)
             {
                 NotifyScanSubmitted(media.Count);
             }
             else
             {
-                MessageBox.Show("提交失败：服务未就绪或已停止，请稍后重试。",
-                    Program_AppTitle(), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(err, Program_AppTitle(),
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 

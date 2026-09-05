@@ -23,7 +23,29 @@
 <main>
   <!-- ======================= 检测页 ======================= -->
   <section id="tab-detect" class="tabpane active">
-    <div class="dropzone" id="dropzone">
+    <!-- 首启模型下载引导（模型未就绪时展示，拦截拖入） -->
+    <section id="modelDl" class="panel modeldl" hidden>
+      <div class="modeldl-head">
+        <span class="mdl-ico" aria-hidden="true">⬇</span>
+        <div class="mdl-intro">
+          <div class="mdl-title">首次使用 · 正在准备语音识别模型</div>
+          <div class="mdl-sub">
+            程序需要下载识别模型（约 <b id="mdlTotal">3 GB</b>）才能开始转写，仅需一次。
+            下载完成后即可拖入视频检测。请保持网络畅通，<b>完成前请先不要拖入视频</b>。
+          </div>
+        </div>
+        <span class="mdl-src" id="mdlSrc"></span>
+      </div>
+      <div class="mdl-files" id="mdlFiles"></div>
+      <div class="mdl-progress">
+        <div class="mdl-pbar"><div id="mdlFill" style="width:0%"></div></div>
+        <span id="mdlPct" class="mdl-pct">0%</span>
+      </div>
+      <div class="model-guide" id="mdlError" hidden></div>
+    </section>
+
+    <div class="dropzone disabled" id="dropzone">
+
       <div class="dz-inner">
         <img class="dz-icon" src="/static/logo.png" alt="" width="64" height="64">
         <div class="dz-title">将视频 / 音频文件或整个文件夹拖入窗口，即可直接检测</div>

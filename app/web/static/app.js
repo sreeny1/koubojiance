@@ -28,6 +28,14 @@ function fmtDur(ms) {
   return h > 0 ? `${h}小时${m}分` : m > 0 ? `${m}分${sec}秒` : `${sec}秒`;
 }
 
+function fmtBytes(n) {
+  if (n == null || !isFinite(n)) return "";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let v = n, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + " " + u[i];
+}
+
 async function api(method, url, body) {
   const opt = { method, headers: {} };
   if (body !== undefined) {
@@ -100,6 +108,7 @@ const state = {
   player: null,   // {videoId, videoName, hits, hitIdx, segments, segByMs}
   cutSelection: new Set(),  // 去词勾选的命中 id
   activeCut: null,          // 进行中的去词任务 {videoId, jobId}
+  modelReady: null,         // 识别模型是否就绪（首启下载拦截依据）
 };
 
 /* ========================= 页签切换 ========================= */
@@ -123,6 +132,8 @@ if (isDesktopApp) {
   // 每次拖入都通知原生层弹覆盖层（C# 侧幂等，重复通知无副作用）。
   // 不用 enter/leave 计数：覆盖层出现后 Chromium 收不到配对的 dragleave，计数会失步。
   document.addEventListener("dragenter", () => {
+    // 模型未就绪时不弹拖放覆盖层（由"首启下载界面 + 后端拦截"引导用户等待）
+    if (state.modelReady === false) return;
     window.chrome.webview.postMessage("native-drag-enter");
   });
   document.addEventListener("dragover", (e) => e.preventDefault());
@@ -776,6 +787,65 @@ function renderModelGuide(guide) {
   </div>`;
 }
 
+/* 首启模型下载界面：展示文件清单/大小/进度，模型未就绪时禁用拖入区 */
+function renderModelDownload(s) {
+  const ready = !!s.model_ready;
+  state.modelReady = ready;
+  const panel = $("#modelDl");
+  const dz = $("#dropzone");
+  if (ready) {
+    panel.hidden = true;
+    dz.classList.remove("disabled");
+    return;
+  }
+  panel.hidden = false;
+  dz.classList.add("disabled");
+
+  const dl = s.model_download || {};
+  const files = dl.files || (s.model_guide ? s.model_guide.files : []);
+  const overall = dl.overall != null ? dl.overall : (dl.frac || 0);
+  const active = !!dl.active;
+
+  // 总大小估计
+  let totalBytes = 0, hasSizes = false;
+  (files || []).forEach((f) => { if (f.size) { totalBytes += f.size; hasSizes = true; } });
+  $("#mdlTotal").textContent = hasSizes ? fmtBytes(totalBytes) : "3 GB";
+  $("#mdlSrc").textContent = dl.source ? `下载源：${esc(dl.source)}` : (active ? "正在连接下载源…" : "准备中…");
+
+  // 文件清单
+  $("#mdlFiles").innerHTML = (files || []).map((f) => {
+    const done = f.status === "done" || f.exists;
+    const downloading = f.status === "downloading";
+    const pct = downloading ? Math.round((dl.file_progress || 0) * 100) : (done ? 100 : 0);
+    return `<div class="mdl-file ${done ? "done" : "downloading"}">
+      <span class="st">${done ? "✓" : (downloading ? "…" : "·")}</span>
+      <span class="nm" title="${esc(f.name)}">${esc(f.name)}</span>
+      <span class="bar"><div style="width:${pct}%"></div></span>
+      <span class="sz">${done ? "完成" : (f.size ? fmtBytes(f.size) : "")}</span>
+    </div>`;
+  }).join("");
+
+  // 总体进度条
+  $("#mdlFill").style.width = Math.round(overall * 100) + "%";
+  $("#mdlPct").textContent = Math.round(overall * 100) + "%";
+
+  // 错误/手动引导
+  const errBox = $("#mdlError");
+  const dlErr = dl.error;
+  const guide = s.model_guide;
+  if (dlErr) {
+    errBox.hidden = false;
+    errBox.innerHTML = `<span class="err-text">自动下载失败：${esc(dlErr)}</span>` +
+      (guide ? renderModelGuide(guide) : "");
+  } else if (!active && !ready) {
+    errBox.hidden = false;
+    errBox.innerHTML = guide ? renderModelGuide(guide) :
+      `<span class="muted small">模型尚未就绪，正在准备…（若长时间无进度，请检查网络或在设置页更换下载源）</span>`;
+  } else {
+    errBox.hidden = true;
+  }
+}
+
 /* ========================= 设置页 ========================= */
 async function loadSettings() {
   const s = await api("GET", "/api/settings");
@@ -813,6 +883,8 @@ async function refreshStatus() {
     const s = await api("GET", "/api/status");
     // 版本号标注到顶栏（服务端下发，保持唯一数据源）
     if (s.version) $("#appVer").textContent = " v" + s.version;
+    // 首启模型下载界面（展示文件/大小/进度，并用"禁用拖入区"+后端拦截避免过早拖入）
+    renderModelDownload(s);
     // 模型正在自动下载（首次启动）优先提示
     const dl = s.model_download || {};
     if (dl.active && dl.name) {
@@ -859,26 +931,28 @@ async function refreshAll(force) {
 }
 
 let pollTimer = null;
-function schedulePoll() {
-  const hasActive = (state.results?.videos || []).some(
+function hasBusyWork() {
+  return !state.modelReady || (state.results?.videos || []).some(
     (v) => v.task_status === "queued" || v.task_status === "running");
+}
+function schedulePoll() {
+  const busy = hasBusyWork();
   pollTimer = setTimeout(async () => {
     if (!document.hidden) await refreshAll(false);
     schedulePoll();
-  }, hasActive ? 2000 : 10000);
+  }, busy ? 2000 : 10000);
 }
 
-/* 任务进度轮询：空闲时大幅放慢（30s），仅在有任务时保持 1.5s 高频，
+/* 任务进度轮询：空闲时大幅放慢（30s），仅在有任务或模型下载时保持高频，
    避免后台无工作时持续占用网络/CPU */
 let taskPollTimer = null;
 function scheduleTaskPoll() {
-  const hasActive = (state.results?.videos || []).some(
-    (v) => v.task_status === "queued" || v.task_status === "running");
+  const busy = hasBusyWork();
   clearTimeout(taskPollTimer);
   taskPollTimer = setTimeout(async () => {
     if (!document.hidden) await pollTaskProgress();
     scheduleTaskPoll();
-  }, hasActive ? 1500 : 30000);
+  }, busy ? 1500 : 30000);
 }
 
 /* 进度数据：任务接口提供实时 progress，合并进 results 视图 */
@@ -905,6 +979,7 @@ function maybeShowWelcome() {
   let seen = false;
   try { seen = localStorage.getItem("welcome_seen") === "1"; } catch (_) {}
   if (seen) return;
+  if (state.modelReady === false) return;  // 模型未就绪时优先展示"下载引导"，先不弹欢迎
   const videos = (state.results?.stats?.videos) || 0;
   if (videos > 0) return;  // 已有记录说明不是首次
   $("#welcomeModal").hidden = false;

@@ -188,11 +188,13 @@ class WhisperEngine:
 
     def ensure_model(self, name: str | None = None,
                      progress: Callable[[float], None] | None = None,
-                     cancel_check: Callable[[], bool] | None = None) -> None:
+                     cancel_check: Callable[[], bool] | None = None,
+                     state_cb: Callable[[dict], None] | None = None) -> None:
         """确保模型已下载到本地（全自动，国内源优先）。
 
         - 已就绪：直接返回；- 尚未下载：自动断点续传下载；
         - 并发安全：至多一个线程在下载；同目标等待共享，不同目标串行等待。
+        - state_cb：可选，接收"每文件详情 + 进度"的状态字典，供前端展示下载界面。
         """
         from .model_downloader import download_model
 
@@ -200,6 +202,8 @@ class WhisperEngine:
         if self.is_model_ready(target):
             if progress:
                 progress(1.0)
+            if state_cb:
+                state_cb({"name": target, "ready": True})
             return
 
         with self._dl_cond:
@@ -210,12 +214,15 @@ class WhisperEngine:
             if self.is_model_ready(target):
                 if progress:
                     progress(1.0)
+                if state_cb:
+                    state_cb({"name": target, "ready": True})
                 return
             self._dl_target = target
         try:
             from .model_downloader import _DownloadCanceled
 
-            download_model(target, progress=progress, cancel_check=cancel_check)
+            download_model(target, progress=progress, cancel_check=cancel_check,
+                           state_cb=state_cb)
         except _DownloadCanceled:
             raise TranscriptionCanceled() from None
         finally:

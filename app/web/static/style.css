@@ -130,6 +130,9 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 24px 80px; }
   border-color: var(--accent); background: var(--accent-soft);
   transform: scale(1.005);
 }
+/* 模型未就绪时禁用拖入区（配合首启下载引导） */
+.dropzone.disabled { opacity: .55; pointer-events: none; }
+.dropzone.disabled .dz-actions button, .dropzone.disabled .manual-paths button { display: none; }
 .dz-icon { margin: 12px auto 6px; display: block; border-radius: 12px; opacity: 0.95; font-size: 40px; }
 .dz-title { font-size: 16px; font-weight: 600; }
 .dz-sub { color: var(--ink-2); font-size: 13px; margin-bottom: 14px; }
@@ -140,6 +143,33 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 24px 80px; }
   width: 100%; margin: 8px 0; padding: 8px 10px; font: inherit; color: var(--ink);
   border: 1px solid var(--line); border-radius: 8px; resize: vertical; background: var(--card);
 }
+
+/* ---------- 首启模型下载引导 ---------- */
+.modeldl { border: 1px solid var(--strip-line); background: var(--strip-bg); }
+.modeldl-head { display: flex; align-items: center; gap: 14px; }
+.mdl-ico {
+  width: 44px; height: 44px; border-radius: 12px; background: var(--accent);
+  color: var(--accent-ink); font-size: 20px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.mdl-intro { flex: 1; min-width: 0; }
+.mdl-title { font-weight: 700; font-size: 15px; }
+.mdl-sub { color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+.mdl-src { font-size: 12px; color: var(--ink-2); background: var(--surface); padding: 3px 10px; border-radius: 99px; white-space: nowrap; }
+.mdl-files { margin: 14px 0 6px; }
+.mdl-file { display: flex; align-items: center; gap: 10px; padding: 7px 4px; font-size: 13px; border-bottom: 1px solid var(--line-3); }
+.mdl-file:last-child { border-bottom: 0; }
+.mdl-file .st { width: 16px; text-align: center; }
+.mdl-file .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdl-file .sz { color: var(--ink-2); font-size: 12px; min-width: 64px; text-align: right; }
+.mdl-file.done .nm { color: var(--ok); }
+.mdl-file.downloading .nm { color: var(--accent); font-weight: 600; }
+.mdl-file .bar { width: 120px; height: 5px; background: var(--progress-track); border-radius: 99px; overflow: hidden; }
+.mdl-file .bar > div { height: 100%; background: var(--accent); border-radius: 99px; transition: width .25s ease; }
+.mdl-progress { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.mdl-pbar { flex: 1; height: 8px; background: var(--progress-track); border-radius: 99px; overflow: hidden; }
+.mdl-pbar > div { height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s ease; }
+.mdl-pct { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 600; min-width: 44px; text-align: right; }
 
 /* ---------- 按钮 ---------- */
 .btn {

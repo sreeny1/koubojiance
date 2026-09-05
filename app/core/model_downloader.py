@@ -154,7 +154,7 @@ def manual_download_guide(name: str) -> dict:
     return {
         "name": name,
         "target_dir": str(local_model_path(name)),
-        "files": MODEL_FILES,
+        "files": _initial_files(name),
         "sources": [
             {"label": label, "base": base}
             for label, base in _source_candidates(name)
@@ -162,34 +162,102 @@ def manual_download_guide(name: str) -> dict:
     }
 
 
+def _initial_files(name: str) -> list[dict]:
+    """构造模型文件清单（大小用估算值，存在标记按本地判断）。"""
+    return [
+        {"name": f, "size": None, "exists": (local_model_path(name) / f).is_file(),
+         "status": "done" if (local_model_path(name) / f).is_file() else "pending"}
+        for f in MODEL_FILES
+    ]
+
+
+def _fetch_file_sizes(base: str, name: str) -> dict[str, int]:
+    """从源拉取模型文件大小（HEAD 请求，失败回退估算）。返回 {fname: bytes}。"""
+    sizes: dict[str, int] = {}
+    for fname in MODEL_FILES:
+        url = f"{base}/{fname}"
+        try:
+            r = httpx.head(url, timeout=10, trust_env=False, follow_redirects=True)
+            if r.status_code == 200 and r.headers.get("content-length"):
+                sizes[fname] = int(r.headers["content-length"])
+        except Exception:  # noqa: BLE001  个别 CDN 不支持 HEAD
+            pass
+    return sizes
+
+
+def _estimate_size(name: str, fname: str) -> int | None:
+    """按模型名估算单文件大小（主要用于大文件 model.bin 展示 '约 3GB'）。"""
+    est = {
+        "large-v3": {"model.bin": 3_087_284_237, "tokenizer.json": 2_480_617,
+                     "vocabulary.json": 1_068_114},
+        "large-v3-turbo": {"model.bin": 1_600_000_000},
+        "medium": {"model.bin": 1_500_000_000},
+        "small": {"model.bin": 480_000_000},
+        "base": {"model.bin": 140_000_000},
+        "tiny": {"model.bin": 75_000_000},
+    }
+    return est.get(name, {}).get(fname)
+
+
 def _download_from(base: str, name: str, target_dir: Path,
                    progress: Callable[[float], None] | None,
                    cancel_check: Callable[[], bool] | None,
-                   src_label: str) -> None:
+                   src_label: str,
+                   state_cb: Callable[[dict], None] | None = None) -> None:
     """从单个源下载全部模型文件（断点续传）。失败抛异常。"""
-    file_progress = [0.0]
-    n_files = len(MODEL_FILES)
+    sizes = _fetch_file_sizes(base, name)
+    files = []
+    for fname in MODEL_FILES:
+        exists = (target_dir / fname).is_file()
+        files.append({
+            "name": fname,
+            "size": sizes.get(fname) or _estimate_size(name, fname),
+            "exists": exists,
+            "status": "done" if exists else "pending",
+        })
+    state = {
+        "name": name, "source": src_label, "overall": 0.0,
+        "current_file": None, "file_index": 0, "file_count": len(MODEL_FILES),
+        "file_progress": 0.0, "files": files, "downloaded": 0, "total": 0,
+    }
+    n = len(MODEL_FILES)
     for i, fname in enumerate(MODEL_FILES):
-        file_progress[0] = 1.0 if (target_dir / fname).exists() else 0.0
+        if state["files"][i]["exists"]:
+            state["files"][i]["status"] = "done"
+            state["overall"] = (i + 1) / n
+            if state_cb:
+                state_cb(dict(state))
+            continue
+        state["files"][i]["status"] = "downloading"
+        state["current_file"] = fname
+        state["file_index"] = i
+        size = state["files"][i]["size"] or 0
+        state["total"] = size
         url = f"{base}/{fname}"
-        download_file(
-            url, target_dir / fname,
-            progress=lambda f: _set_file(file_progress, f, i, n_files, name, progress),
-            cancel_check=cancel_check,
-        )
-        file_progress[0] = 1.0
-        if progress:
-            progress((i + 1) / n_files)
+
+        def on_f(frac: float, _state=state, _i=i) -> None:
+            _set_file(_state, frac, _i, name, progress, state_cb)
+
+        download_file(url, target_dir / fname, progress=on_f, cancel_check=cancel_check)
+        state["files"][i]["status"] = "done"
+        state["files"][i]["exists"] = True
+        state["overall"] = (i + 1) / n
+        state["downloaded"] = size
+        if state_cb:
+            state_cb(dict(state))
 
 
 def download_model(name: str,
                    progress: Callable[[float], None] | None = None,
-                   cancel_check: Callable[[], bool] | None = None) -> None:
+                   cancel_check: Callable[[], bool] | None = None,
+                   state_cb: Callable[[dict], None] | None = None) -> None:
     """下载完整模型到 data/models/local/<name>/（多源竞速 + 断点续传 + 失败回退）。"""
     target_dir = local_model_path(name)
     if is_model_ready(name):
         if progress:
             progress(1.0)
+        if state_cb:
+            state_cb({"name": name, "ready": True})
         return
 
     sources = _pick_sources(name)
@@ -197,7 +265,7 @@ def download_model(name: str,
     for label, base in sources:
         try:
             print(f"  使用下载源：{label}", flush=True)
-            _download_from(base, name, target_dir, progress, cancel_check, label)
+            _download_from(base, name, target_dir, progress, cancel_check, label, state_cb)
             if is_model_ready(name):
                 return
         except _DownloadCanceled:
@@ -211,13 +279,21 @@ def download_model(name: str,
     )
 
 
-def _set_file(file_progress: list[float], f: float, i: int, n_files: int,
-              name: str, progress: Callable[[float], None] | None) -> None:
-    """合并单文件进度到总体进度：总进度 = 已完文件 + 当前文件比例。"""
+def _set_file(state: dict, f: float, i: int,
+              name: str, progress: Callable[[float], None] | None,
+              state_cb: Callable[[dict], None] | None) -> None:
+    """更新总体/当前文件进度，并回调（供前端展示每文件详情）。"""
+    n = state["file_count"]
+    overall = (i + f) / n
+    state["overall"] = overall
+    state["file_index"] = i
+    state["current_file"] = state["files"][i]["name"]
+    state["file_progress"] = f
+    state["downloaded"] = int(f * (state["files"][i]["size"] or 0))
     if progress:
-        overall = (i + f) / n_files
-        file_progress[0] = f
         progress(overall)
+    if state_cb:
+        state_cb(dict(state))
 
 
 if __name__ == "__main__":

@@ -35,9 +35,21 @@ _MEDIA_TYPES = {
 # ----------------------------------------------------------------------
 # 任务提交与管理
 # ----------------------------------------------------------------------
+def _ensure_model_ready() -> None:
+    """模型未就绪时拒绝提交转写，避免用户在软件完整可用前拖入视频。"""
+    m = get_manager()
+    if not m.engine.is_model_ready():
+        raise HTTPException(
+            409,
+            "识别模型尚未下载完成，暂时还不能开始检测。"
+            "请等待模型下载完成（或按界面提示手动放置模型）后再拖入视频。"
+        )
+
+
 @router.post("/scan")
 def scan(payload: dict = Body(...)):
-    """提交本地路径（文件或目录）进行转写检测。"""
+    """提交本地路径（文件或目录）进行转写检测。模型未就绪时拦截。"""
+    _ensure_model_ready()
     paths = payload.get("paths") or []
     if not isinstance(paths, list) or not paths:
         raise HTTPException(400, "paths 不能为空")
@@ -52,7 +64,8 @@ def scan(payload: dict = Body(...)):
 
 @router.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    """网页拖拽上传的文件落地到 data/media 并直接入队。"""
+    """网页拖拽上传的文件落地到 data/media 并直接入队。模型未就绪时拦截。"""
+    _ensure_model_ready()
     if not file.filename:
         raise HTTPException(400, "缺少文件名")
     suffix = Path(file.filename).suffix.lower()
@@ -460,10 +473,12 @@ def status():
     except Exception:  # noqa: BLE001  系统信息获取失败不影响状态接口
         sys_info = {}
     guide = None
+    model_ready = True
     try:
         from core.model_downloader import is_model_ready, manual_download_guide
         model_name = m.settings.get("model", "large-v3")
-        if not is_model_ready(model_name):
+        model_ready = is_model_ready(model_name)
+        if not model_ready:
             guide = manual_download_guide(model_name)
     except Exception:  # noqa: BLE001
         guide = None
@@ -472,6 +487,7 @@ def status():
         "settings": m.settings,
         "task_counts": counts,
         "model_download": m.download_state,
+        "model_ready": model_ready,        # 模型是否已就绪（首启拦截拖入的依据）
         "system": sys_info,
         "model_guide": guide,              # 模型缺失时的手动下载引导（含链接与目标目录）
         "version": config.APP_VERSION,
