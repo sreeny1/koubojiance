@@ -834,11 +834,24 @@ function renderModelDownload(s) {
   const files = dl.files || (s.model_guide ? s.model_guide.files : []);
   const overall = dl.overall != null ? dl.overall : (dl.frac || 0);
   const active = !!dl.active;
+  const modelName = dl.name || (s.model_guide && s.model_guide.name) || "";
 
   // 总大小估计
   let totalBytes = 0, hasSizes = false;
   (files || []).forEach((f) => { if (f.size) { totalBytes += f.size; hasSizes = true; } });
-  $("#mdlTotal").textContent = hasSizes ? fmtBytes(totalBytes) : "3 GB";
+  const totalText = hasSizes ? `约 ${fmtBytes(totalBytes)}` : "约 3 GB";
+
+  // 区分"首次使用（本地无任何模型）"与"切换模型（已有其它模型）"
+  const isFirst = !s.has_any_model;
+  $("#mdlTitle").textContent = isFirst
+    ? "首次使用 · 正在准备语音识别模型"
+    : `切换模型 · 正在下载识别模型「${esc(modelName || "…")}」`;
+  $("#mdlSub").innerHTML = isFirst
+    ? `程序需要下载识别模型（${totalText}）才能开始转写，仅需一次。` +
+      `下载完成后即可拖入视频检测。请保持网络畅通，<b>完成前请先不要拖入视频</b>。`
+    : `检测到识别模型已切换为「${esc(modelName || "…")}」，需要下载（${totalText}）才能开始转写。` +
+      `下载完成后即可恢复拖入检测，<b>完成前请先不要拖入视频</b>。`;
+
   $("#mdlSrc").textContent = dl.source ? `下载源：${esc(dl.source)}` : (active ? "正在连接下载源…" : "准备中…");
 
   // 文件清单

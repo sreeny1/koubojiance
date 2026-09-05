@@ -474,10 +474,12 @@ def status():
         sys_info = {}
     guide = None
     model_ready = True
+    has_any_model = False
     try:
-        from core.model_downloader import is_model_ready, manual_download_guide
+        from core.model_downloader import any_model_ready, is_model_ready, manual_download_guide
         model_name = m.settings.get("model", "large-v3")
         model_ready = is_model_ready(model_name)
+        has_any_model = any_model_ready()
         if not model_ready:
             guide = manual_download_guide(model_name)
     except Exception:  # noqa: BLE001
@@ -487,7 +489,8 @@ def status():
         "settings": m.settings,
         "task_counts": counts,
         "model_download": m.download_state,
-        "model_ready": model_ready,        # 模型是否已就绪（首启拦截拖入的依据）
+        "model_ready": model_ready,        # 当前选中的模型是否已就绪
+        "has_any_model": has_any_model,    # 本地是否已有任意完整模型（区分首次使用/切换模型）
         "system": sys_info,
         "model_guide": guide,              # 模型缺失时的手动下载引导（含链接与目标目录）
         "version": config.APP_VERSION,

@@ -165,10 +165,20 @@ def manual_download_guide(name: str) -> dict:
 def _initial_files(name: str) -> list[dict]:
     """构造模型文件清单（大小用估算值，存在标记按本地判断）。"""
     return [
-        {"name": f, "size": None, "exists": (local_model_path(name) / f).is_file(),
+        {"name": f, "size": _estimate_size(name, f), "exists": (local_model_path(name) / f).is_file(),
          "status": "done" if (local_model_path(name) / f).is_file() else "pending"}
         for f in MODEL_FILES
     ]
+
+
+def any_model_ready() -> bool:
+    """本地是否已有任意一个完整模型（用于区分"首次使用"与"切换模型"）。"""
+    if not LOCAL_MODELS.is_dir():
+        return False
+    for d in LOCAL_MODELS.iterdir():
+        if d.is_dir() and (d / "model.bin").is_file():
+            return True
+    return False
 
 
 def _fetch_file_sizes(base: str, name: str) -> dict[str, int]:
