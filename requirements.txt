@@ -1,0 +1,23 @@
+# 违禁词检测 - Python 依赖
+# Web 框架
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+
+# 语音转写（本地 GPU 加速）
+faster-whisper>=1.0
+# 钉死 4.5.0：4.8.x 的 Windows wheel 在模型加载时段错误崩溃（0xC0000005）
+ctranslate2==4.5.0
+# 钉死 1.19.2：1.23.x 在部分 Windows 机器上 DLL 初始化失败（错误 1114）
+onnxruntime==1.19.2
+# GPU 运行库（cuBLAS / cuDNN，供 ctranslate2 调用，仅 Windows GPU 需要）
+nvidia-cublas-cu12
+nvidia-cudnn-cu12>=9,<10
+
+# 文本处理
+pypinyin>=0.50      # 拼音归一化，识别谐音变体
+zhconv>=1.4         # 繁体转简体
+
+# 工具
+openpyxl>=3.1       # Excel 报告导出
+imageio-ffmpeg>=0.4.9  # 内置 ffmpeg 二进制（抽取音轨/测试视频生成）

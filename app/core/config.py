@@ -1,0 +1,92 @@
+"""全局配置与路径管理。
+
+所有运行时数据（数据库、模型、字幕、导出文件、缓存）统一收在项目内
+data/ 目录下，保证不向项目外写入任何文件。
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import time
+from pathlib import Path
+from typing import Any
+
+# 项目根目录 = app/ 的上一级
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+DATA_DIR = BASE_DIR / "data"
+MODELS_DIR = DATA_DIR / "models"        # whisper 模型缓存
+MEDIA_DIR = DATA_DIR / "media"          # 网页拖拽上传的视频落地目录
+SUBTITLES_DIR = DATA_DIR / "subtitles"  # 导出的 SRT 字幕
+EXPORTS_DIR = DATA_DIR / "exports"      # 导出的 Excel 报告
+DB_PATH = DATA_DIR / "app.db"
+SETTINGS_PATH = DATA_DIR / "settings.json"
+
+# ---- 应用版本（每次发布更新此号；界面/日志/状态接口统一读取）----
+APP_NAME = "口播违禁词检测"
+APP_VERSION = "1.1.0"
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    # 转写模型：large-v3 准确率最高；备选 medium / small / large-v3-turbo（更快）
+    "model": "large-v3",
+    # device: auto(自动检测 GPU) / cuda / cpu
+    "device": "auto",
+    # compute_type: int8_float16(默认，省显存) / float16 / int8
+    "compute_type": "int8_float16",
+    # 转写语言（zh=中文）。auto 为自动检测
+    "language": "zh",
+    # 同时转写的任务数。GPU 显存有限，默认 1；纯 CPU 可调大
+    "max_workers": 1,
+    # HuggingFace 模型下载源。留空=官方源；国内网络不通时可填 https://hf-mirror.com
+    "hf_endpoint": "",
+    # 同时显示/检索的默认违禁词分类
+    "ui": {
+        "accent": "#4f6ef7",
+    },
+}
+
+
+def ensure_dirs() -> None:
+    """创建所有数据目录（幂等）。"""
+    for d in (DATA_DIR, MODELS_DIR, MEDIA_DIR, SUBTITLES_DIR, EXPORTS_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+def load_settings() -> dict[str, Any]:
+    """读取设置。文件损坏时自动备份并回退到默认值（鲁棒性）。"""
+    ensure_dirs()
+    if not SETTINGS_PATH.exists():
+        save_settings(DEFAULT_SETTINGS)
+        return dict(DEFAULT_SETTINGS)
+    try:
+        data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("settings root is not an object")
+        # 以默认值为底合并，保证新增字段有值
+        merged = _deep_merge(DEFAULT_SETTINGS, data)
+        return merged
+    except Exception as e:  # noqa: BLE001
+        backup = SETTINGS_PATH.with_suffix(f".corrupt-{int(time.time())}.bak")
+        shutil.copy2(SETTINGS_PATH, backup)
+        save_settings(DEFAULT_SETTINGS)
+        return dict(DEFAULT_SETTINGS)
+
+
+def save_settings(settings: dict[str, Any]) -> None:
+    """原子写入设置文件（先写临时文件再替换，避免写一半损坏）。"""
+    ensure_dirs()
+    tmp = SETTINGS_PATH.with_suffix(".tmp")
+    tmp.write_text(
+        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    os.replace(tmp, SETTINGS_PATH)
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    out = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out

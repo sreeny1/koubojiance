@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>口播违禁词检测</title>
+<link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+<link rel="apple-touch-icon" href="/static/logo.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><img class="logo" src="/static/logo.png" alt="口播违禁词检测" width="28" height="28">口播违禁词检测<span id="appVer" class="ver"></span></div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="detect">检测</button>
+    <button class="tab" data-tab="words">词库</button>
+    <button class="tab" data-tab="settings">设置</button>
+  </nav>
+  <div class="engine-badge" id="engineBadge" title="转写引擎实际生效配置">引擎：未加载</div>
+</header>
+
+<main>
+  <!-- ======================= 检测页 ======================= -->
+  <section id="tab-detect" class="tabpane active">
+    <div class="dropzone" id="dropzone">
+      <div class="dz-inner">
+        <img class="dz-icon" src="/static/logo.png" alt="" width="64" height="64">
+        <div class="dz-title">将视频 / 音频文件拖入窗口，即可直接检测</div>
+        <div class="dz-sub">支持 mp4 / mov / mkv / avi / mp3 / wav 等 · 原生拖放不复制文件 · 也可一次拖入多个</div>
+        <div class="dz-actions">
+          <button class="btn" id="btnPickFiles">浏览文件…</button>
+          <button class="btn" id="btnPickFolder">浏览文件夹…</button>
+        </div>
+        <details class="manual-paths">
+          <summary>或手动粘贴路径（每行一个，支持文件夹）</summary>
+          <textarea id="manualPaths" rows="3" placeholder="E:\视频\作品1.mp4&#10;E:\视频\待审文件夹"></textarea>
+          <button class="btn btn-sm" id="btnSubmitPaths">提交路径</button>
+        </details>
+      </div>
+    </div>
+
+    <div class="statsbar" id="statsBar">
+      <div class="stats" id="statsText">—</div>
+      <div class="stats-actions">
+        <button class="btn btn-sm" id="btnRedetect" title="词库变更后，对已转写视频重新检索（无需重新转写）">重新检测</button>
+        <button class="btn btn-sm btn-primary" id="btnExport">导出 Excel 报告</button>
+        <button class="btn btn-sm btn-danger" id="btnClearList" title="一键清空全部检测数据（保留词库和设置）">一键清除列表</button>
+      </div>
+    </div>
+
+    <div id="taskStrip" class="taskstrip" hidden></div>
+    <div id="videoList" class="videolist"></div>
+  </section>
+
+  <!-- ======================= 词库页 ======================= -->
+  <section id="tab-words" class="tabpane">
+    <div class="words-layout">
+
+      <!-- 左栏：词库列表 -->
+      <div class="panel words-list">
+        <div class="panel-head">
+          <h3>词库列表</h3>
+          <span class="muted small" id="wordCount"></span>
+        </div>
+        <div class="word-toolbar">
+          <select id="filterCat"><option value="">全部分类</option></select>
+          <input id="searchWord" placeholder="搜索词…">
+        </div>
+        <div class="cat-chips" id="catChips"></div>
+        <div class="wordlist" id="wordList"></div>
+      </div>
+
+      <!-- 右栏：添加词库 -->
+      <aside class="panel words-add">
+        <h3>添加词库</h3>
+
+        <div class="add-block">
+          <div class="add-title">新增分类</div>
+          <div class="add-row">
+            <input id="newCatName" placeholder="分类名称">
+            <input id="newCatColor" type="color" value="#e5484d">
+          </div>
+          <button class="btn btn-sm btn-primary add-btn" id="btnAddCat">添加分类</button>
+        </div>
+
+        <div class="add-block">
+          <div class="add-title">新增违禁词</div>
+          <select id="wordCat"></select>
+          <input id="newWord" placeholder="违禁词，如：全网最低价">
+          <input id="newNote" placeholder="备注（可选）">
+          <button class="btn btn-sm btn-primary add-btn" id="btnAddWord">添加</button>
+        </div>
+
+        <div class="add-block">
+          <div class="add-title">批量导入</div>
+          <select id="bulkCat"></select>
+          <textarea id="bulkText" rows="3" placeholder="每行一个词，回车分隔"></textarea>
+          <button class="btn btn-sm add-btn" id="btnBulkAdd">批量导入</button>
+        </div>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- ======================= 设置页 ======================= -->
+  <section id="tab-settings" class="tabpane">
+    <div class="panel settings-panel">
+      <h3>转写设置</h3>
+      <div class="form-grid">
+        <label>识别模型
+          <select id="setModel">
+            <option value="large-v3">large-v3（最准确，约3GB）</option>
+            <option value="large-v3-turbo">large-v3-turbo（快，准确率略降）</option>
+            <option value="medium">medium（均衡，约1.5GB）</option>
+            <option value="small">small（轻量，约500MB）</option>
+          </select>
+        </label>
+        <label>计算设备
+          <select id="setDevice">
+            <option value="auto">自动（有 GPU 用 GPU）</option>
+            <option value="cuda">GPU（CUDA）</option>
+            <option value="cpu">CPU</option>
+          </select>
+        </label>
+        <label>精度
+          <select id="setCompute">
+            <option value="int8_float16">int8_float16（默认，省显存）</option>
+            <option value="float16">float16（更快，显存充足时用）</option>
+            <option value="int8">int8（最省资源）</option>
+          </select>
+        </label>
+        <label>识别语言
+          <select id="setLanguage">
+            <option value="zh">中文</option>
+            <option value="auto">自动检测</option>
+            <option value="en">英语</option>
+          </select>
+        </label>
+        <label>并发任务数
+          <input id="setWorkers" type="number" min="1" max="8" value="1">
+        </label>
+        <label class="wide">模型下载源
+          <input id="setHfEndpoint" placeholder="留空=官方源；国内可填 https://hf-mirror.com">
+        </label>
+      </div>
+      <p class="muted small">模型文件保存在项目 data\models 目录。修改并发数后需重启程序生效；其余设置从下次转写开始生效。</p>
+      <button class="btn btn-primary" id="btnSaveSettings">保存设置</button>
+    </div>
+    <div class="panel">
+      <h3>当前引擎状态</h3>
+      <div id="engineInfo" class="engine-info">尚未加载模型（首次转写时自动加载）</div>
+    </div>
+  </section>
+</main>
+
+<!-- ======================= 播放器弹窗 ======================= -->
+<div class="modal" id="playerModal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <div class="modal-title" id="pmTitle">视频</div>
+      <button class="iconbtn" id="pmClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="pm-video-wrap">
+        <video id="pmVideo" controls preload="metadata"></video>
+        <div class="pm-hits-head">
+          <span>命中列表</span>
+          <div>
+            <button class="btn btn-xs" id="pmPrev">上一处</button>
+            <button class="btn btn-xs" id="pmNext">下一处</button>
+          </div>
+        </div>
+        <div class="pm-hits" id="pmHits"></div>
+      </div>
+      <div class="pm-subs-wrap">
+        <div class="pm-subs-head">完整字幕（点击任意句跳转）</div>
+        <div class="pm-subs" id="pmSubs"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<div id="busy" class="busy" hidden><div class="spinner"></div><div id="busyText">处理中…</div></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

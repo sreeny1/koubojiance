@@ -1,0 +1,43 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.venv-*/
+venv/
+env/
+.eggs/
+
+# ===== 运行时数据（全部收在 data/，仅品牌图标入库）=====
+/data/*
+!/data/brand/
+!/data/brand/**
+
+# ===== 构建产物（可再生成）=====
+/build/
+/dist/
+*.exe
+*.dll
+*.pdb
+lib/webview2/*.dll
+lib/webview2/runtimes/
+lib/webview2/.fetched
+
+# ===== WebView2 运行时数据（exe 运行自动生成）=====
+*.WebView2/
+
+# ===== 备份 / 归档 =====
+/backups/
+/_archive/
+
+# ===== IDE / 工具 =====
+.trae/
+.idea/
+.vscode/
+*.suo
+
+# ===== 系统 =====
+Thumbs.db
+Desktop.ini
+.DS_Store
