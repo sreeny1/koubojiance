@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
 """检测器端到端逻辑测试：归一化层 + 拼音谐音层 + 时间内插。"""
 import sys
+import tempfile
 from pathlib import Path
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
-from core.config import DB_PATH
-from core.database import Database, init_db
-from core.detector import Detector
+from core.database import Database  # noqa: E402
+from core.detector import Detector  # noqa: E402
 
-# 独立临时库，避免污染正式数据
-DB_PATH.unlink(missing_ok=True)
-for suffix in ("-wal", "-shm"):
-    Path(str(DB_PATH) + suffix).unlink(missing_ok=True)
-
-db = init_db()
+# 独立临时库，绝不污染正式 data/app.db（正式库由种子词库建库）
+db = Database(Path(tempfile.mkdtemp(prefix="detector_test_")) / "app.db")
 det = Detector(db)
 
 cases = [
