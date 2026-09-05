@@ -135,7 +135,7 @@ window.chrome?.webview?.addEventListener("message", (ev) => {
   const msg = ev.data;
   if (!msg || typeof msg !== "object") return;
   if (msg.type === "scan-submitted") {
-    toast(`已提交 ${msg.count} 个文件开始检测`);
+    toast(`已提交 ${msg.count} 项（文件 / 文件夹）开始检测`);
     refreshAll(true);
   }
 });

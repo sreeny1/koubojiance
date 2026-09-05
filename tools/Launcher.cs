@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -326,6 +327,7 @@ namespace LanJinCiLauncher
         private WebView2 _web;
         private System.Windows.Forms.Label _loading;
         private System.Windows.Forms.Panel _dropOverlay;
+        private System.Windows.Forms.Panel _dropCard;
         private System.Windows.Forms.Timer _overlayGuard;
         private System.Windows.Forms.Timer _retry;
         private readonly object _navLock = new object();
@@ -367,40 +369,85 @@ namespace LanJinCiLauncher
             StartPosition = FormStartPosition.CenterScreen;
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
-            // 隐形全窗拖放覆盖层：平时完全隐藏（界面即纯网页，无任何额外 UI）。
+            // 全窗拖放覆盖层：平时完全隐藏（界面即纯网页，无任何额外 UI）。
             // 当文件拖入网页时，前端 JS 通过 postMessage 通知显示本层，
             // 由它（纯 WinForms，AllowDrop 可用）接管拖放并取真实路径 → /api/scan 零复制。
-            // 背景/文字色贴合网页主题（--bg #f4f6fa / --ink #1c2333），观感如网页自身浮现提示。
             _dropOverlay = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(244, 246, 250),
+                BackColor = Color.FromArgb(232, 237, 248),
                 Visible = false,
                 AllowDrop = true
             };
+
+            // 居中拖放卡片（圆角 + 虚线边框 + 图标），替代原朴素两行文字
+            _dropCard = new Panel
+            {
+                Size = new Size(540, 300),
+                BackColor = Color.White,
+                AllowDrop = true
+            };
+            _dropCard.Paint += (s, pe) =>
+            {
+                pe.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var pen = new Pen(Color.FromArgb(79, 110, 247), 2f))
+                {
+                    pen.DashStyle = DashStyle.Dash;
+                    var r = new Rectangle(2, 2, _dropCard.Width - 5, _dropCard.Height - 5);
+                    using (var path = RoundedRect(r, 20))
+                        pe.Graphics.DrawPath(pen, path);
+                }
+            };
+            SetRoundedRegion(_dropCard, 20);
+
+            var ovIcon = new PictureBox
+            {
+                Size = new Size(56, 56),
+                Location = new Point((_dropCard.Width - 56) / 2, 36),
+                SizeMode = PictureBoxSizeMode.Zoom,
+                BackColor = Color.Transparent,
+                AllowDrop = true
+            };
+            try { ovIcon.Image = Icon.ExtractAssociatedIcon(Application.ExecutablePath).ToBitmap(); }
+            catch (Exception) { /* 图标缺失时忽略 */ }
+
             var ovTitle = new Label
             {
                 Text = "松开鼠标，开始检测",
-                Dock = DockStyle.Fill,
+                Bounds = new Rectangle(0, 108, _dropCard.Width, 42),
                 TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Microsoft YaHei UI", 22F, FontStyle.Bold),
+                Font = new Font("Microsoft YaHei UI", 20F, FontStyle.Bold),
                 ForeColor = Color.FromArgb(28, 35, 51),
                 AllowDrop = true
             };
             var ovSub = new Label
             {
-                Text = "支持 mp4 / mov / mkv / avi / mp3 / wav 等 · 可一次拖入多个 · 不复制文件",
-                Dock = DockStyle.Bottom,
-                Height = 90,
-                TextAlign = ContentAlignment.TopCenter,
-                Font = new Font("Microsoft YaHei UI", 11F),
+                Text = "可拖入多个视频 / 音频文件，或整个文件夹（自动扫描其中媒体）",
+                Bounds = new Rectangle(24, 160, _dropCard.Width - 48, 32),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Microsoft YaHei UI", 12F),
                 ForeColor = Color.FromArgb(91, 100, 120),
                 AllowDrop = true
             };
-            _dropOverlay.Controls.Add(ovTitle);
-            _dropOverlay.Controls.Add(ovSub);
-            // 三个控件都挂同一组拖放事件（OLE 目标按 HWND 查找，子控件也要注册）
-            foreach (var c in new Control[] { _dropOverlay, ovTitle, ovSub })
+            var ovFmt = new Label
+            {
+                Text = "mp4 · mov · mkv · avi · mp3 · wav · m4a 等 · 零复制 · 支持整个文件夹",
+                Bounds = new Rectangle(24, 198, _dropCard.Width - 48, 26),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Microsoft YaHei UI", 10F),
+                ForeColor = Color.FromArgb(150, 158, 176),
+                AllowDrop = true
+            };
+
+            _dropCard.Controls.Add(ovIcon);
+            _dropCard.Controls.Add(ovTitle);
+            _dropCard.Controls.Add(ovSub);
+            _dropCard.Controls.Add(ovFmt);
+            _dropOverlay.Controls.Add(_dropCard);
+            _dropOverlay.Resize += (s, e) => CenterDropCard();
+
+            // 所有子控件都挂同一组拖放事件（OLE 目标按 HWND 查找，子控件也要注册）
+            foreach (var c in new Control[] { _dropOverlay, _dropCard, ovIcon, ovTitle, ovSub, ovFmt })
             {
                 c.DragEnter += OnOverlayDragEnter;
                 c.DragDrop += OnOverlayDragDrop;
@@ -563,9 +610,36 @@ namespace LanJinCiLauncher
         private void ShowDropOverlay()
         {
             if (InvokeRequired) { BeginInvoke((Action)ShowDropOverlay); return; }
+            CenterDropCard();
             _dropOverlay.Visible = true;
             _dropOverlay.BringToFront();
             _overlayGuard.Start();
+        }
+
+        private void CenterDropCard()
+        {
+            if (_dropCard == null || _dropOverlay == null) return;
+            _dropCard.Location = new Point(
+                Math.Max(0, (_dropOverlay.ClientSize.Width - _dropCard.Width) / 2),
+                Math.Max(0, (_dropOverlay.ClientSize.Height - _dropCard.Height) / 2));
+        }
+
+        private static GraphicsPath RoundedRect(Rectangle r, int radius)
+        {
+            var path = new GraphicsPath();
+            int d = radius * 2;
+            path.AddArc(r.X, r.Y, d, d, 180, 90);
+            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        private static void SetRoundedRegion(Control c, int radius)
+        {
+            using (var path = RoundedRect(new Rectangle(0, 0, c.Width, c.Height), radius))
+                c.Region = new Region(path);
         }
 
         private void HideDropOverlay()
@@ -604,14 +678,22 @@ namespace LanJinCiLauncher
                 paths = e.Data.GetData(DataFormats.FileDrop) as string[];
             if (paths == null || paths.Length == 0)
                 return;
+
+            // 支持"多个文件 + 多个文件夹"混合拖入：文件过滤媒体扩展名，文件夹整体交给后端递归扫描
             var media = new List<string>();
+            int folderCount = 0;
             foreach (var p in paths)
             {
-                if (Program.IsVideoFile(p)) media.Add(p);
+                try
+                {
+                    if (Directory.Exists(p)) { media.Add(p); folderCount++; }
+                    else if (Program.IsVideoFile(p)) media.Add(p);
+                }
+                catch (Exception) { /* 忽略无法访问的路径 */ }
             }
             if (media.Count == 0)
             {
-                MessageBox.Show("拖入的文件不支持。\n支持的格式：mp4 / mov / mkv / avi / mp3 / wav / m4a 等。",
+                MessageBox.Show("拖入的内容不支持。\n支持：mp4 / mov / mkv / avi / mp3 / wav / m4a 等媒体文件，或包含这些媒体的整个文件夹。",
                     Program_AppTitle(), MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
