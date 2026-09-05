@@ -758,6 +758,19 @@ async function afterWordChange() {
   refreshAll(true);
 }
 
+/* 模型手动下载引导 */
+function renderModelGuide(guide) {
+  if (!guide || !guide.sources || !guide.sources.length) return "";
+  const links = guide.sources.map((s) =>
+    `<a href="${esc(s.base)}" target="_blank" rel="noopener">${esc(s.label)}</a>`).join(" · ");
+  return `<div class="model-guide">
+    <div class="mg-title">手动下载引导（自动下载失败时可用）</div>
+    <div>1. 从任一源下载全部文件：${links}</div>
+    <div>2. 放入目录：<code>${esc(guide.target_dir)}</code></div>
+    <div>3. 重启软件，程序会自动识别本地模型</div>
+  </div>`;
+}
+
 /* ========================= 设置页 ========================= */
 async function loadSettings() {
   const s = await api("GET", "/api/settings");
@@ -803,22 +816,32 @@ async function refreshStatus() {
       $("#engineInfo").innerHTML =
         `正在从<b>国内源</b>自动下载识别模型 <b>${esc(dl.name)}</b>（约3GB，断点续传）… <b>${pct}%</b><br>` +
         `下载完成后即可开始转写，无需任何手动操作。` +
-        (dl.error ? `<br><span class="err-text">下载失败：${esc(dl.error)}，程序会在下次使用时自动续传重试</span>` : "");
+        (dl.error ? `<br><span class="err-text">下载失败：${esc(dl.error)}，程序会在下次使用时自动续传重试</span>` +
+          renderModelGuide(s.model_guide) : "");
       return;
     }
     const eff = s.effective;
+    const gpu = (s.system && s.system.gpu) || {};
+    const gpuNote = gpu.vendor === "amd"
+      ? `检测到 <b>AMD 显卡</b>（${esc(gpu.name || "AMD")}）——本地引擎暂不支持 AMD 加速，将使用 <b>CPU 模式</b>。`
+      : gpu.vendor === "nvidia"
+        ? `检测到 <b>NVIDIA 显卡</b>，将使用 <b>GPU 加速</b>。`
+        : "";
     if (eff && eff.model) {
       const dev = eff.device === "cuda" ? "GPU" : "CPU";
       $("#engineBadge").textContent = `引擎：${eff.model} · ${dev} · ${eff.compute_type}`;
       $("#engineInfo").innerHTML =
         `当前生效：<b>${esc(eff.model)}</b> · <b>${eff.device === "cuda" ? "GPU 加速" : "CPU"}</b> · ` +
         `精度 <b>${esc(eff.compute_type)}</b><br>` +
+        (gpuNote ? gpuNote + "<br>" : "") +
         `排队 ${s.task_counts.queued || 0} · 进行中 ${s.task_counts.running || 0} · ` +
         `已完成 ${s.task_counts.done || 0} · 失败 ${s.task_counts.error || 0}`;
     } else {
-      $("#engineBadge").textContent = "引擎：未加载";
+      $("#engineBadge").textContent = gpu.vendor === "amd" ? "引擎：CPU 模式" : "引擎：未加载";
       $("#engineInfo").innerHTML =
+        (gpuNote ? gpuNote + "<br>" : "") +
         `尚未加载模型（首次转写时自动加载并下载到 data\\models）。<br>` +
+        (s.model_guide ? renderModelGuide(s.model_guide) : "") +
         `排队 ${s.task_counts.queued || 0} · 进行中 ${s.task_counts.running || 0}`;
     }
   } catch (_) { /* 状态刷新失败不影响使用 */ }

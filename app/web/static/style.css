@@ -317,6 +317,13 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 24px 80px; }
 }
 .engine-info { font-size: 13px; color: var(--ink-2); line-height: 2; }
 .engine-info b { color: var(--ink); }
+.model-guide {
+  margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--line);
+  border-radius: 8px; background: var(--surface); line-height: 1.9; font-size: 12px;
+}
+.model-guide .mg-title { font-weight: 600; color: var(--ink); }
+.model-guide a { color: var(--accent); }
+.model-guide code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; color: var(--ink); }
 
 /* ---------- 播放器弹窗 ---------- */
 .modal {

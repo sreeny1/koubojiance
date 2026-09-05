@@ -111,47 +111,104 @@ class _DownloadCanceled(Exception):
     """用户取消了模型下载（与转写取消共用语义）。"""
 
 
+def _source_candidates(name: str) -> list[tuple[str, str]]:
+    """可用下载源列表（按优先级返回 label 与 base URL）。"""
+    cands: list[tuple[str, str]] = []
+    if name in MS_AVAILABLE:
+        cands.append(("ModelScope（国内直连）", MS_BASE.format(name=name)))
+    cands.append(("hf-mirror 镜像", HF_BASE.format(name=name)))
+    return cands
+
+
+def _probe_speed(base: str, name: str) -> float:
+    """探测某源的下载速度（字节/秒），失败返回 0。用 config.json 小文件试速。"""
+    url = f"{base}/config.json"
+    t0 = time.time()
+    got = 0
+    try:
+        with httpx.stream("GET", url, timeout=15, trust_env=False,
+                          follow_redirects=True) as r:
+            r.raise_for_status()
+            for chunk in r.iter_bytes(256 * 1024):
+                got += len(chunk)
+                if got > 2 * 1024 * 1024:  # 最多读 2MB，够估速即可
+                    break
+    except Exception:  # noqa: BLE001
+        return 0.0
+    dt = time.time() - t0
+    return got / dt if dt > 0 else 0.0
+
+
+def _pick_sources(name: str) -> list[tuple[str, str]]:
+    """并发探测各源速度，返回按"最快优先"排序的源列表。"""
+    cands = _source_candidates(name)
+    scored: list[tuple[float, str, str]] = []
+    for label, base in cands:
+        scored.append((_probe_speed(base, name), label, base))
+    scored.sort(key=lambda x: -x[0])
+    return [(label, base) for _, label, base in scored]
+
+
+def manual_download_guide(name: str) -> dict:
+    """下载失败时给用户的手动引导信息（前端展示可点击链接与目标目录）。"""
+    return {
+        "name": name,
+        "target_dir": str(local_model_path(name)),
+        "files": MODEL_FILES,
+        "sources": [
+            {"label": label, "base": base}
+            for label, base in _source_candidates(name)
+        ],
+    }
+
+
+def _download_from(base: str, name: str, target_dir: Path,
+                   progress: Callable[[float], None] | None,
+                   cancel_check: Callable[[], bool] | None,
+                   src_label: str) -> None:
+    """从单个源下载全部模型文件（断点续传）。失败抛异常。"""
+    file_progress = [0.0]
+    n_files = len(MODEL_FILES)
+    for i, fname in enumerate(MODEL_FILES):
+        file_progress[0] = 1.0 if (target_dir / fname).exists() else 0.0
+        url = f"{base}/{fname}"
+        download_file(
+            url, target_dir / fname,
+            progress=lambda f: _set_file(file_progress, f, i, n_files, name, progress),
+            cancel_check=cancel_check,
+        )
+        file_progress[0] = 1.0
+        if progress:
+            progress((i + 1) / n_files)
+
+
 def download_model(name: str,
                    progress: Callable[[float], None] | None = None,
                    cancel_check: Callable[[], bool] | None = None) -> None:
-    """下载完整模型到 data/models/local/<name>/（自动选择源与断点续传）。"""
+    """下载完整模型到 data/models/local/<name>/（多源竞速 + 断点续传 + 失败回退）。"""
     target_dir = local_model_path(name)
     if is_model_ready(name):
         if progress:
             progress(1.0)
         return
 
-    if ms_exists(name):
-        base = MS_BASE.format(name=name)
-        src = "ModelScope(国内直连)"
-    else:
-        base = HF_BASE.format(name=name)
-        src = "hf-mirror(直连)"
-        # hf-mirror 国内直连：绕过系统代理，避免 VPN 劫持 TLS
-        urllib.request.getproxies = lambda: {}  # type: ignore[assignment]
-
-    file_progress = [0.0]  # 当前文件已下载比例（回调线程内更新）
-    n_files = len(MODEL_FILES)
-    for i, fname in enumerate(MODEL_FILES):
-        if (target_dir / fname).exists():
-            file_progress[0] = 1.0
-        else:
-            file_progress[0] = 0.0
-        url = f"{base}/{fname}"
+    sources = _pick_sources(name)
+    last_err: Exception | None = None
+    for label, base in sources:
         try:
-            download_file(
-                url, target_dir / fname,
-                progress=lambda f: _set_file(file_progress, f, i, n_files, name, progress),
-                cancel_check=cancel_check,
-            )
+            print(f"  使用下载源：{label}", flush=True)
+            _download_from(base, name, target_dir, progress, cancel_check, label)
+            if is_model_ready(name):
+                return
+        except _DownloadCanceled:
+            raise
         except Exception as e:  # noqa: BLE001
-            raise RuntimeError(
-                f"模型下载失败（{src}）：{fname} — {e}\n"
-                f"请检查网络后重试（已支持断点续传，再次启动会从断点继续）"
-            ) from e
-        file_progress[0] = 1.0
-        if progress:
-            progress((i + 1) / n_files)
+            last_err = e
+            print(f"  [警告] 源 {label} 下载失败（{e}），尝试下一源", flush=True)
+    raise RuntimeError(
+        f"模型下载失败（已尝试全部源）：{last_err}\n"
+        f"请检查网络后重试，或按界面提示手动下载后放入 {target_dir}"
+    )
 
 
 def _set_file(file_progress: list[float], f: float, i: int, n_files: int,

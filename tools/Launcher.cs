@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -49,6 +50,9 @@ namespace LanJinCiLauncher
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+
+            // 最低配置门槛：内存 / 磁盘 / AVX2 任一不满足则友好提示并退出
+            if (!CheckSystemRequirements()) return;
 
             string exeDir = AppDomain.CurrentDomain.BaseDirectory;
             string python = null;
@@ -318,6 +322,66 @@ namespace LanJinCiLauncher
                 }
             }
             return sb.ToString();
+        }
+
+        // ------------------------- 最低配置门槛 -------------------------
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MEMORYSTATUSEX
+        {
+            public uint dwLength;
+            public uint dwMemoryLoad;
+            public ulong ullTotalPhys;
+            public ulong ullAvailPhys;
+            public ulong ullTotalPageFile;
+            public ulong ullAvailPageFile;
+            public ulong ullTotalVirtual;
+            public ulong ullAvailVirtual;
+            public ulong ullAvailExtendedVirtual;
+        }
+
+        [DllImport("kernel32.dll")]
+        private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool IsProcessorFeaturePresent(uint processorFeature);
+
+        private static bool CheckSystemRequirements()
+        {
+            var problems = new List<string>();
+            try
+            {
+                var m = new MEMORYSTATUSEX { dwLength = (uint)Marshal.SizeOf(typeof(MEMORYSTATUSEX)) };
+                if (GlobalMemoryStatusEx(ref m))
+                {
+                    double ramGB = m.ullTotalPhys / (1024.0 * 1024 * 1024);
+                    if (ramGB < 8.0) problems.Add(string.Format("物理内存不足（{0:F1}GB，最低 8GB）", ramGB));
+                }
+            }
+            catch (Exception) { }
+
+            try
+            {
+                var drive = new DriveInfo(AppDomain.CurrentDomain.BaseDirectory);
+                double freeGB = drive.AvailableFreeSpace / (1024.0 * 1024 * 1024);
+                if (freeGB < 8.0) problems.Add(string.Format("磁盘剩余空间不足（{0:F1}GB，最低 8GB）", freeGB));
+            }
+            catch (Exception) { }
+
+            try
+            {
+                if (!IsProcessorFeaturePresent(40)) problems.Add("CPU 不支持 AVX2 指令集（本地转写引擎无法运行）");
+            }
+            catch (Exception) { }
+
+            if (problems.Count > 0)
+            {
+                MessageBox.Show(
+                    "当前电脑配置过低，无法使用本软件：\n\n" + string.Join("\n", problems) +
+                    "\n\n建议升级硬件后再运行。",
+                    AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+            return true;
         }
     }
 

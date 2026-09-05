@@ -454,11 +454,26 @@ def status():
     db = get_db()
     counts = {c["status"]: c["c"] for c in db.query(
         "SELECT status, COUNT(*) c FROM tasks GROUP BY status")}
+    try:
+        from core.syscheck import system_info
+        sys_info = system_info(config.DATA_DIR)
+    except Exception:  # noqa: BLE001  系统信息获取失败不影响状态接口
+        sys_info = {}
+    guide = None
+    try:
+        from core.model_downloader import is_model_ready, manual_download_guide
+        model_name = m.settings.get("model", "large-v3")
+        if not is_model_ready(model_name):
+            guide = manual_download_guide(model_name)
+    except Exception:  # noqa: BLE001
+        guide = None
     return {
         "effective": m.engine.effective,   # 实际生效的模型/设备（未加载时为 null）
         "settings": m.settings,
         "task_counts": counts,
         "model_download": m.download_state,
+        "system": sys_info,
+        "model_guide": guide,              # 模型缺失时的手动下载引导（含链接与目标目录）
         "version": config.APP_VERSION,
     }
 
