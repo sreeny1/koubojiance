@@ -40,8 +40,13 @@ def local_model_path(name: str) -> Path:
 
 
 def is_model_ready(name: str) -> bool:
-    """本地模型是否完整（引擎加载前检查）。"""
-    return (local_model_path(name) / "model.bin").is_file()
+    """本地模型是否完整（引擎加载前检查）。
+
+    要求全部固定文件齐全——若只有 model.bin 却缺 tokenizer/vocabulary 等小文件，
+    会误判为就绪导致加载失败，因此必须逐个核对。
+    """
+    d = local_model_path(name)
+    return all((d / f).is_file() for f in MODEL_FILES)
 
 
 def ms_exists(name: str) -> bool:
@@ -204,14 +209,13 @@ def any_model_ready() -> bool:
 
 
 def available_models() -> list[str]:
-    """本地已就绪（含 model.bin）的模型名列表，用于界面标注"已下载"。"""
+    """本地已"完整"就绪的模型名列表（用于界面标注"已下载"，避免残缺模型误标）。"""
     if not LOCAL_MODELS.is_dir():
         return []
-    names = []
-    for d in LOCAL_MODELS.iterdir():
-        if d.is_dir() and (d / "model.bin").is_file():
-            names.append(d.name)
-    return sorted(names)
+    return sorted(
+        d.name for d in LOCAL_MODELS.iterdir()
+        if d.is_dir() and is_model_ready(d.name)
+    )
 
 
 def _fetch_file_sizes(base: str, name: str) -> dict[str, int]:
