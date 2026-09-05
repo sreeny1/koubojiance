@@ -121,7 +121,32 @@ def _source_candidates(name: str) -> list[tuple[str, str]]:
 
 
 def _probe_speed(base: str, name: str) -> float:
-    """探测某源的下载速度（字节/秒），失败返回 0。用 config.json 小文件试速。"""
+    """探测某源的真实下载带宽（字节/秒）。用 model.bin 前 8MB 的 Range 请求实测。
+
+    旧实现用小文件 config.json 只能反映连接延迟（虚低），无法区分快慢源；
+    改测大文件块才能真正反映 CDN 带宽，帮助"多源竞速"选到最快源。
+    """
+    url = f"{base}/model.bin"
+    headers = {"Range": "bytes=0-8388607"}
+    t0 = time.time()
+    got = 0
+    try:
+        with httpx.stream("GET", url, headers=headers, timeout=25, trust_env=False,
+                          follow_redirects=True) as r:
+            if r.status_code not in (200, 206):
+                r.raise_for_status()
+            for chunk in r.iter_bytes(1024 * 1024):
+                got += len(chunk)
+                if got >= 8 * 1024 * 1024:  # 读满 8MB 即可估速
+                    break
+    except Exception:  # noqa: BLE001  个别 CDN 不支持 Range，退回小文件估延迟
+        return _probe_speed_latency(base)
+    dt = time.time() - t0
+    return got / dt if dt > 0 else 0.0
+
+
+def _probe_speed_latency(base: str) -> float:
+    """兜底：用小文件 config.json 估延迟（仅当实测失败时）。"""
     url = f"{base}/config.json"
     t0 = time.time()
     got = 0
@@ -131,7 +156,7 @@ def _probe_speed(base: str, name: str) -> float:
             r.raise_for_status()
             for chunk in r.iter_bytes(256 * 1024):
                 got += len(chunk)
-                if got > 2 * 1024 * 1024:  # 最多读 2MB，够估速即可
+                if got > 2 * 1024 * 1024:
                     break
     except Exception:  # noqa: BLE001
         return 0.0
