@@ -308,7 +308,17 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 24px 80px; }
   border: 3px solid #dfe4f0; border-top-color: var(--accent);
   animation: spin .8s linear infinite;
 }
+.spinner.mini { width: 14px; height: 14px; border-width: 2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- 去词进度条 ---------- */
+.cutbar {
+  position: fixed; top: 66px; left: 50%; transform: translateX(-50%);
+  z-index: 95; background: var(--card); border: 1px solid var(--line);
+  border-radius: 99px; box-shadow: var(--shadow); padding: 8px 16px;
+}
+.cutbar-inner { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.cutbar .progressbar { width: 160px; }
 .muted { color: var(--ink-2); }
 .small { font-size: 12px; }
 

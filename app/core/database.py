@@ -74,6 +74,19 @@ CREATE TABLE IF NOT EXISTS hits (
     sentence TEXT NOT NULL              -- 命中所在完整字幕句
 );
 CREATE INDEX IF NOT EXISTS idx_hits_video ON hits(video_id);
+CREATE TABLE IF NOT EXISTS cut_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_id INTEGER NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+    hit_ids TEXT NOT NULL,              -- JSON 数组：选中的命中 id
+    pad REAL DEFAULT 0.3,               -- 命中前后缓冲（秒）
+    status TEXT NOT NULL DEFAULT 'queued',  -- queued/running/done/error/canceled
+    error TEXT,
+    progress REAL DEFAULT 0,
+    backup_path TEXT,                   -- 去词前原文件备份路径
+    created_at TEXT DEFAULT (datetime('now','localtime')),
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cut_jobs_video ON cut_jobs(video_id);
 """
 
 # 种子违禁词库：覆盖常见的广告法极限词 / 医疗功效 / 金融风险 / 平台敏感

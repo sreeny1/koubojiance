@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from core import config
 from core.database import get_db
 from core.exporter import export_hits
+from server.cut_tasks import get_cut_manager
 from server.tasks import VIDEO_EXTS, get_manager
 
 log = logging.getLogger("api")
@@ -239,6 +240,53 @@ def delete_video(video_id: int, remove_file: bool = False):
     return {"ok": True, "removed_file": removed_file}
 
 
+# ----------------------------------------------------------------------
+# 去词切割（自定义去除选中的违禁词）
+# ----------------------------------------------------------------------
+@router.post("/videos/{video_id}/cut")
+def submit_cut(video_id: int, payload: dict = Body(...)):
+    """提交去词任务：hit_ids 为选中的命中 id 列表，pad 为命中前后缓冲秒。"""
+    db = get_db()
+    video = db.query_one("SELECT id, path FROM videos WHERE id=?", (video_id,))
+    if not video:
+        raise HTTPException(404, "视频不存在")
+    if Path(video["path"]).suffix.lower() != ".mp4":
+        raise HTTPException(400, "仅支持 mp4 格式去词")
+    hit_ids = payload.get("hit_ids") or []
+    if not isinstance(hit_ids, list) or not hit_ids:
+        raise HTTPException(400, "请至少选择一条命中")
+    try:
+        hit_ids = [int(x) for x in hit_ids]
+    except (TypeError, ValueError):
+        raise HTTPException(400, "hit_ids 必须是整数数组") from None
+    try:
+        pad = max(0.0, min(2.0, float(payload.get("pad", 0.3))))
+    except (TypeError, ValueError):
+        pad = 0.3
+    job_id = get_cut_manager().submit(video_id, hit_ids, pad)
+    return {"job_id": job_id}
+
+
+@router.get("/videos/{video_id}/cut-jobs")
+def list_cut_jobs(video_id: int):
+    """该视频的去词任务列表（含实时进度）。"""
+    rows = get_db().query(
+        "SELECT * FROM cut_jobs WHERE video_id=? ORDER BY id DESC LIMIT 20",
+        (video_id,),
+    )
+    prog = get_cut_manager().progress_map()
+    for r in rows:
+        r["progress"] = prog.get(r["id"], r["progress"] or 0.0)
+    return {"jobs": rows}
+
+
+@router.post("/cut-jobs/{job_id}/cancel")
+def cancel_cut_job(job_id: int):
+    if not get_cut_manager().cancel(job_id):
+        raise HTTPException(400, "任务不存在或已结束")
+    return {"ok": True}
+
+
 @router.delete("/data")
 def clear_all_data():
     """一键清除全部检测数据（任务/视频/字幕/命中），词库与设置不动。"""
@@ -429,9 +477,13 @@ def shutdown():
     def _graceful_stop() -> None:
         time.sleep(0.4)  # 让响应先返回给调用方
         try:
-            get_manager().shutdown()  # 停 worker 线程（最多等 3s）
+            get_manager().shutdown()  # 停转写 worker 线程（最多等 3s）
         except Exception:  # noqa: BLE001
             logging.getLogger("tasks").exception("优雅关停异常（忽略）")
+        try:
+            get_cut_manager().shutdown()  # 停去词 worker 线程
+        except Exception:  # noqa: BLE001
+            logging.getLogger("cut_tasks").exception("去词任务关停异常（忽略）")
         try:
             get_db().close()
         except Exception:  # noqa: BLE001

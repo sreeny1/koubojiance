@@ -74,6 +74,8 @@ const state = {
   lastResultsJson: "",
   words: null,
   player: null,   // {videoId, videoName, hits, hitIdx, segments, segByMs}
+  cutSelection: new Set(),  // 去词勾选的命中 id
+  activeCut: null,          // 进行中的去词任务 {videoId, jobId}
 };
 
 /* ========================= 页签切换 ========================= */
@@ -248,9 +250,10 @@ function renderVideoList(videos) {
       </div>`;
     } else {
       body = `<table class="hit-table">
-        <thead><tr><th style="width:110px">时间点</th><th style="width:130px">违禁词</th><th>口播内容</th></tr></thead>
+        <thead><tr><th style="width:36px"><input type="checkbox" class="hit-check-all" data-vid="${v.id}" title="全选/取消全选"></th><th style="width:110px">时间点</th><th style="width:130px">违禁词</th><th>口播内容</th></tr></thead>
         <tbody>${v.hits.map((h, i) => `
           <tr class="clickable" data-vid="${v.id}" data-hidx="${i}">
+            <td><input type="checkbox" class="hit-check" data-vid="${v.id}" data-hid="${h.id}" ${state.cutSelection.has(h.id) ? "checked" : ""}></td>
             <td><span class="time-link">▶ ${fmtTimeFine(h.start_ms)}</span></td>
             <td><span class="word-tag" style="background:${esc(h.color)}">${esc(h.word_text)}</span>
                 ${h.matched_text !== h.word_text ? `<br><span class="muted small">原文:${esc(h.matched_text)}</span>` : ""}</td>
@@ -267,6 +270,7 @@ function renderVideoList(videos) {
         <span class="badge ${status}">${statusText}</span>
         <button class="btn btn-xs" data-act="retest">重测</button>
         ${v.seg_count ? `<button class="btn btn-xs" data-act="srt">SRT</button>` : ""}
+        ${v.hits.length && (v.path || "").toLowerCase().endsWith(".mp4") ? `<button class="btn btn-xs btn-primary" data-act="cut" title="去除勾选的违禁词片段：原文件自动备份，成品文件名不变">去除所选</button>` : ""}
         <button class="btn btn-xs btn-danger" data-act="del">删除</button>
         <button class="btn btn-xs btn-danger" data-act="delfile" title="删除该文件到回收站（可恢复），同时移除本记录">删除文件</button>
       </div>
@@ -307,8 +311,11 @@ function fillSubsSlot(vid, segments) {
     </div>`).join("");
 }
 
-/* 卡片事件委托：播放定位 / 歌词行跳转 / 重测 / SRT / 删除 */
+/* 卡片事件委托：播放定位 / 歌词行跳转 / 去词勾选 / 重测 / SRT / 删除 */
 $("#videoList").addEventListener("click", async (e) => {
+  const cb = e.target.closest(".hit-check, .hit-check-all");
+  if (cb) { handleCutCheckbox(cb); return; }
+
   const sub = e.target.closest(".subs-row");
   if (sub) {
     openPlayerAt(Number(sub.dataset.vid), Number(sub.dataset.ms));
@@ -330,6 +337,8 @@ $("#videoList").addEventListener("click", async (e) => {
     try { await api("POST", "/api/scan", { paths: [v.path] }); toast("已重新加入队列"); }
     catch (err) { toast(err.message, true); }
     refreshAll(true);
+  } else if (btn.dataset.act === "cut") {
+    await cutSelected(vid);
   } else if (btn.dataset.act === "srt") {
     window.open(`/api/videos/${vid}/srt`, "_blank");
   } else if (btn.dataset.act === "del") {
@@ -350,6 +359,88 @@ $("#videoList").addEventListener("click", async (e) => {
     refreshAll(true);
   }
 });
+
+/* ========================= 去词（自定义去除违禁词） ========================= */
+function handleCutCheckbox(cb) {
+  if (cb.classList.contains("hit-check-all")) {
+    const vid = Number(cb.dataset.vid);
+    const v = state.results.videos.find((x) => x.id === vid);
+    if (!v) return;
+    v.hits.forEach((h) => cb.checked ? state.cutSelection.add(h.id) : state.cutSelection.delete(h.id));
+    document.querySelectorAll(`.hit-check[data-vid="${vid}"]`).forEach((c) => { c.checked = cb.checked; });
+  } else {
+    const hid = Number(cb.dataset.hid);
+    const vid = Number(cb.dataset.vid);
+    if (cb.checked) state.cutSelection.add(hid); else state.cutSelection.delete(hid);
+    const v = state.results.videos.find((x) => x.id === vid);
+    if (v) {
+      const all = v.hits.every((h) => state.cutSelection.has(h.id));
+      const ac = document.querySelector(`.hit-check-all[data-vid="${vid}"]`);
+      if (ac) ac.checked = all;
+    }
+  }
+}
+
+async function cutSelected(vid) {
+  const v = state.results.videos.find((x) => x.id === vid);
+  if (!v) return;
+  const hids = v.hits.map((h) => h.id).filter((id) => state.cutSelection.has(id));
+  if (!hids.length) { toast("请先勾选要去除的违禁词", true); return; }
+  const ok = confirm(
+    `将去除 ${hids.length} 处命中对应的画面和声音片段（命中前后各 0.3 秒）。\n\n` +
+    `· 原视频会先备份到视频所在文件夹\n` +
+    `· 成品文件名保持不变\n` +
+    `· 去词后会自动重新检测一次\n\n确认开始？`
+  );
+  if (!ok) return;
+  try {
+    const r = await api("POST", `/api/videos/${vid}/cut`, { hit_ids: hids, pad: 0.3 });
+    state.activeCut = { videoId: vid, jobId: r.job_id };
+    state.cutSelection.clear();
+    updateCutBar({ status: "queued", progress: 0 });
+    toast("去词任务已开始");
+    scheduleCutPoll();
+    refreshAll(true);
+  } catch (err) { toast(err.message, true); }
+}
+
+function updateCutBar(job) {
+  const pct = Math.max(0, Math.min(100, Math.round((job.progress || 0) * 100)));
+  $("#cutBar").hidden = false;
+  $("#cutBarText").textContent =
+    (job.status === "queued" ? "去词排队中…" : "去词处理中…") + ` ${pct}%`;
+  $("#cutBarFill").style.width = pct + "%";
+}
+function hideCutBar() { $("#cutBar").hidden = true; }
+
+async function pollCutJob() {
+  if (!state.activeCut) { hideCutBar(); return; }
+  const { videoId } = state.activeCut;
+  try {
+    const r = await api("GET", `/api/videos/${videoId}/cut-jobs`);
+    const job = r.jobs.find((j) => j.id === state.activeCut.jobId) || r.jobs[0];
+    if (!job) return;
+    if (job.status === "queued" || job.status === "running") {
+      updateCutBar(job);
+    } else {
+      hideCutBar();
+      state.activeCut = null;
+      if (job.status === "done") {
+        toast("去词完成，已自动重新检测" + (job.backup_path ? "（原文件已备份）" : ""));
+      } else if (job.status === "error") {
+        toast("去词失败：" + job.error, true);
+      } else {
+        toast("去词已取消");
+      }
+      refreshAll(true);
+      return;
+    }
+  } catch (_) { /* 忽略：下次轮询重试 */ }
+}
+function scheduleCutPoll() {
+  if (!state.activeCut) return;
+  setTimeout(async () => { await pollCutJob(); scheduleCutPoll(); }, 1500);
+}
 
 /* ========================= 播放器弹窗 ========================= */
 async function openPlayer(videoId, hitIdx = null) {

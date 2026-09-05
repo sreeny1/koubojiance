@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from core.database import init_db  # noqa: E402
 from server.api import router  # noqa: E402
+from server.cut_tasks import init_cut_manager  # noqa: E402
 from server.tasks import init_manager  # noqa: E402
 
 
@@ -88,7 +89,8 @@ def main() -> None:
         os.environ["HF_ENDPOINT"] = str(settings["hf_endpoint"])
 
     init_db()
-    init_manager()  # 启动后台工作线程（会恢复上次未完成任务）
+    init_manager()      # 启动转写工作线程（会恢复上次未完成任务）
+    init_cut_manager()  # 启动去词切割工作线程
 
     app = create_app()
     port = find_free_port()
