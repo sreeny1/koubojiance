@@ -26,11 +26,14 @@ LOCAL_MODELS = MODELS_DIR / "local"
 MS_BASE = "https://modelscope.cn/models/Systran/faster-whisper-{name}/resolve/master"
 HF_BASE = "https://hf-mirror.com/Systran/faster-whisper-{name}/resolve/main"
 
-# faster-whisper 模型仓库的固定文件清单
+# faster-whisper 模型仓库的候选文件清单
 MODEL_FILES = [
     "model.bin", "config.json", "preprocessor_config.json",
     "tokenizer.json", "vocabulary.json",
 ]
+# 加载必需要的最小文件集（不同模型仓库文件不全相同，small/medium 可能缺少
+# preprocessor_config.json / vocabulary.json，缺失不影响 faster-whisper 加载）
+_REQUIRED_FILES = ["model.bin", "config.json", "tokenizer.json"]
 # ModelScope 已官方镜像的模型尺寸（经 verify_model.py 逐文件核验过大模型）
 MS_AVAILABLE = {"large-v3", "large-v3-turbo", "medium", "small", "base", "tiny"}
 
@@ -40,13 +43,13 @@ def local_model_path(name: str) -> Path:
 
 
 def is_model_ready(name: str) -> bool:
-    """本地模型是否完整（引擎加载前检查）。
+    """本地模型是否可加载（引擎加载前检查）。
 
-    要求全部固定文件齐全——若只有 model.bin 却缺 tokenizer/vocabulary 等小文件，
-    会误判为就绪导致加载失败，因此必须逐个核对。
+    只校验 faster-whisper 加载必需的最小文件集。不同模型仓库文件数不同：
+    small/medium 可能没有 preprocessor_config.json / vocabulary.json，缺失属正常。
     """
     d = local_model_path(name)
-    return all((d / f).is_file() for f in MODEL_FILES)
+    return all((d / f).is_file() for f in _REQUIRED_FILES)
 
 
 def ms_exists(name: str) -> bool:
@@ -125,58 +128,16 @@ def _source_candidates(name: str) -> list[tuple[str, str]]:
     return cands
 
 
-def _probe_speed(base: str, name: str) -> float:
-    """探测某源的真实下载带宽（字节/秒）。用 model.bin 前 8MB 的 Range 请求实测。
 
-    旧实现用小文件 config.json 只能反映连接延迟（虚低），无法区分快慢源；
-    改测大文件块才能真正反映 CDN 带宽，帮助"多源竞速"选到最快源。
-    """
-    url = f"{base}/model.bin"
-    headers = {"Range": "bytes=0-8388607"}
-    t0 = time.time()
-    got = 0
-    try:
-        with httpx.stream("GET", url, headers=headers, timeout=25, trust_env=False,
-                          follow_redirects=True) as r:
-            if r.status_code not in (200, 206):
-                r.raise_for_status()
-            for chunk in r.iter_bytes(1024 * 1024):
-                got += len(chunk)
-                if got >= 8 * 1024 * 1024:  # 读满 8MB 即可估速
-                    break
-    except Exception:  # noqa: BLE001  个别 CDN 不支持 Range，退回小文件估延迟
-        return _probe_speed_latency(base)
-    dt = time.time() - t0
-    return got / dt if dt > 0 else 0.0
-
-
-def _probe_speed_latency(base: str) -> float:
-    """兜底：用小文件 config.json 估延迟（仅当实测失败时）。"""
-    url = f"{base}/config.json"
-    t0 = time.time()
-    got = 0
-    try:
-        with httpx.stream("GET", url, timeout=15, trust_env=False,
-                          follow_redirects=True) as r:
-            r.raise_for_status()
-            for chunk in r.iter_bytes(256 * 1024):
-                got += len(chunk)
-                if got > 2 * 1024 * 1024:
-                    break
-    except Exception:  # noqa: BLE001
-        return 0.0
-    dt = time.time() - t0
-    return got / dt if dt > 0 else 0.0
 
 
 def _pick_sources(name: str) -> list[tuple[str, str]]:
-    """并发探测各源速度，返回按"最快优先"排序的源列表。"""
-    cands = _source_candidates(name)
-    scored: list[tuple[float, str, str]] = []
-    for label, base in cands:
-        scored.append((_probe_speed(base, name), label, base))
-    scored.sort(key=lambda x: -x[0])
-    return [(label, base) for _, label, base in scored]
+    """按优先级返回下载源：ModelScope（国内直连，通常最快）优先，hf-mirror 作备份。
+
+    不再做"下载式带宽探测"——那会先下载 16MB 且期间不展示进度，导致用户看到卡在 0%。
+    直接按已知最快的国内源优先，失败再自动切下一源，启动更快、进度更可感知。
+    """
+    return _source_candidates(name)
 
 
 def manual_download_guide(name: str) -> dict:
@@ -246,15 +207,48 @@ def _estimate_size(name: str, fname: str) -> int | None:
     return est.get(name, {}).get(fname)
 
 
-def _download_from(base: str, name: str, target_dir: Path,
+def _resolve_source_files(base: str, name: str) -> list[str]:
+    """返回该模型在该源上"实际存在"的文件清单（HEAD 失败用 GET Range 兜底）。
+
+    不同模型仓库的文件数不同：small/medium 通常缺少 preprocessor_config.json /
+    vocabulary.json（404），不能按固定 5 文件硬下，否则会卡在永远找不到的文件上。
+    """
+    out: list[str] = []
+    for f in MODEL_FILES:
+        url = f"{base}/{f}"
+        ok = False
+        try:
+            r = httpx.head(url, timeout=10, trust_env=False, follow_redirects=True)
+            ok = r.status_code in (200, 206)
+        except Exception:  # noqa: BLE001
+            ok = False
+        if not ok:
+            try:
+                with httpx.stream("GET", url, headers={"Range": "bytes=0-0"},
+                                  timeout=10, trust_env=False, follow_redirects=True) as r:
+                    ok = r.status_code in (200, 206)
+            except Exception:  # noqa: BLE001
+                ok = False
+        if ok:
+            out.append(f)
+    # 本机已存在的文件也纳入（避免源临时探测不到但本地已有）
+    for f in MODEL_FILES:
+        if f not in out and (local_model_path(name) / f).is_file():
+            out.append(f)
+    if not out:
+        out = list(_REQUIRED_FILES)  # 兜底：至少按必需文件
+    return out
+
+
+def _download_from(base: str, name: str, file_list: list[str], target_dir: Path,
                    progress: Callable[[float], None] | None,
                    cancel_check: Callable[[], bool] | None,
                    src_label: str,
                    state_cb: Callable[[dict], None] | None = None) -> None:
-    """从单个源下载全部模型文件（断点续传）。失败抛异常。"""
+    """从单个源下载指定文件（断点续传）。file_list 为该源实际存在的文件。"""
     sizes = _fetch_file_sizes(base, name)
     files = []
-    for fname in MODEL_FILES:
+    for fname in file_list:
         exists = (target_dir / fname).is_file()
         files.append({
             "name": fname,
@@ -262,16 +256,17 @@ def _download_from(base: str, name: str, target_dir: Path,
             "exists": exists,
             "status": "done" if exists else "pending",
         })
+    n = len(file_list)
     state = {
-        "name": name, "source": src_label, "overall": 0.0,
-        "current_file": None, "file_index": 0, "file_count": len(MODEL_FILES),
+        "name": name, "source": src_label, "overall": 0.0, "frac": 0.0,
+        "current_file": None, "file_index": 0, "file_count": n,
         "file_progress": 0.0, "files": files, "downloaded": 0, "total": 0,
     }
-    n = len(MODEL_FILES)
-    for i, fname in enumerate(MODEL_FILES):
+    for i, fname in enumerate(file_list):
         if state["files"][i]["exists"]:
             state["files"][i]["status"] = "done"
             state["overall"] = (i + 1) / n
+            state["frac"] = state["overall"]
             if state_cb:
                 state_cb(dict(state))
             continue
@@ -289,6 +284,7 @@ def _download_from(base: str, name: str, target_dir: Path,
         state["files"][i]["status"] = "done"
         state["files"][i]["exists"] = True
         state["overall"] = (i + 1) / n
+        state["frac"] = state["overall"]
         state["downloaded"] = size
         if state_cb:
             state_cb(dict(state))
@@ -312,7 +308,8 @@ def download_model(name: str,
     for label, base in sources:
         try:
             print(f"  使用下载源：{label}", flush=True)
-            _download_from(base, name, target_dir, progress, cancel_check, label, state_cb)
+            file_list = _resolve_source_files(base, name)
+            _download_from(base, name, file_list, target_dir, progress, cancel_check, label, state_cb)
             if is_model_ready(name):
                 return
         except _DownloadCanceled:
@@ -333,6 +330,7 @@ def _set_file(state: dict, f: float, i: int,
     n = state["file_count"]
     overall = (i + f) / n
     state["overall"] = overall
+    state["frac"] = overall
     state["file_index"] = i
     state["current_file"] = state["files"][i]["name"]
     state["file_progress"] = f

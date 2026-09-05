@@ -74,10 +74,14 @@ class TaskManager:
             def on_state(st: dict) -> None:
                 # 合并"活跃/错误"字段，其余用下载器下发的每文件详情
                 st.setdefault("active", True)
+                # 兼容旧字段：始终保留 frac 与 overall（前端两处读取）
+                st.setdefault("overall", st.get("frac", 0.0))
+                st.setdefault("frac", st.get("overall", 0.0))
                 self._dl_state = st
 
             def on_p(frac: float) -> None:
                 self._dl_state["frac"] = frac
+                self._dl_state["overall"] = frac
 
             try:
                 log.info("本地缺少模型 %s，开始自动下载（国内源，断点续传）", name)

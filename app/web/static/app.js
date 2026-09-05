@@ -940,10 +940,14 @@ async function refreshStatus() {
     // 模型正在自动下载（首次启动）优先提示
     const dl = s.model_download || {};
     if (dl.active && dl.name) {
-      const pct = Math.min(100, Math.floor((dl.frac || 0) * 100));
+      const prog = dl.overall != null ? dl.overall : (dl.frac || 0);
+      const pct = Math.min(100, Math.floor((prog || 0) * 100));
+      const sizeText = dl.files?.some((f) => f.size)
+        ? `（约 ${fmtBytes(dl.files.reduce((sum, f) => sum + (f.size || 0), 0))}，断点续传）`
+        : "（断点续传）";
       $("#engineBadge").textContent = `引擎：正在下载模型 ${dl.name} ${pct}%`;
       $("#engineInfo").innerHTML =
-        `正在从<b>国内源</b>自动下载识别模型 <b>${esc(dl.name)}</b>（约3GB，断点续传）… <b>${pct}%</b><br>` +
+        `正在从<b>${esc(dl.source || "国内源")}</b>自动下载识别模型 <b>${esc(dl.name)}</b>${sizeText}… <b>${pct}%</b><br>` +
         `下载完成后即可开始转写，无需任何手动操作。` +
         (dl.error ? `<br><span class="err-text">下载失败：${esc(dl.error)}，程序会在下次使用时自动续传重试</span>` +
           renderModelGuide(s.model_guide) : "");
