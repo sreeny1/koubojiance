@@ -802,10 +802,37 @@ namespace LanJinCiLauncher
             try
             {
                 if (!_dropOverlay.Visible) { _overlayGuard.Stop(); return; }
-                if (Control.MouseButtons == MouseButtons.None) { HideDropOverlay(); return; }
-                if (!Bounds.Contains(Cursor.Position)) HideDropOverlay();
+                if (!IsDragStillActive()) HideDropOverlay();
             }
             catch (Exception) { _overlayGuard.Stop(); }
+        }
+
+        /// <summary>
+        /// 拖拽是否仍在进行：左键仍被物理按下 且 光标仍在窗口内。
+        /// 注意：OLE 拖拽期间 Control.MouseButtons 不可靠（可能误报 None），
+        /// 必须用 GetAsyncKeyState 读物理按键状态，否则覆盖层会被误隐藏从而闪烁。
+        /// </summary>
+        private bool IsDragStillActive()
+        {
+            bool btnDown;
+            try
+            {
+                btnDown = (Win32.GetAsyncKeyState(0x01) & 0x8000) != 0;
+            }
+            catch (Exception)
+            {
+                btnDown = (Control.MouseButtons & MouseButtons.Left) != 0;
+            }
+            if (!btnDown) return false;
+            // 光标是否仍在窗口内（把屏幕坐标转成客户端坐标再判断）
+            try
+            {
+                return ClientRectangle.Contains(PointToClient(Cursor.Position));
+            }
+            catch (Exception)
+            {
+                return true; // 坐标转换失败时保守不隐藏
+            }
         }
 
         private void OnOverlayDragEnter(object sender, DragEventArgs e)
@@ -876,5 +903,9 @@ namespace LanJinCiLauncher
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         internal static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        // VK_LBUTTON=0x01；高位置位表示该键当前被物理按下
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        internal static extern short GetAsyncKeyState(int vKey);
     }
 }
