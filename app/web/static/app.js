@@ -65,8 +65,13 @@ function resolveTheme(t) {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 function applyTheme(t) {
-  document.documentElement.dataset.theme = resolveTheme(t);
+  const resolved = resolveTheme(t);
+  document.documentElement.dataset.theme = resolved;
   try { localStorage.setItem(THEME_KEY, t); } catch (_) {}
+  // 同步给原生拖放覆盖层（WinForms），让"松开鼠标开始检测"页面跟随主题
+  try {
+    if (window.chrome?.webview) window.chrome.webview.postMessage(resolved === "dark" ? "theme-dark" : "theme-light");
+  } catch (_) {}
 }
 function initTheme() {
   let saved = "system";

@@ -397,6 +397,10 @@ namespace LanJinCiLauncher
         private readonly object _navLock = new object();
         private int _lastPort;
         private bool _hasCore;
+        // 拖放覆盖层主题（跟随网页设置/系统深色）
+        private bool _overlayDark;
+        private Color _ovBackdrop, _ovCard, _ovAccent, _ovInk, _ovInk2, _ovInk3;
+        private System.Windows.Forms.Label _ovTitle, _ovSub, _ovFmt;
 
         public event Action RestartServer;
 
@@ -433,13 +437,17 @@ namespace LanJinCiLauncher
             StartPosition = FormStartPosition.CenterScreen;
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
 
+            // 拖放覆盖层初始主题：先按设置/系统解析，后续由前端 theme 消息实时更新
+            _overlayDark = ResolveInitialDark();
+            ResolveOverlayColors();
+
             // 全窗拖放覆盖层：平时完全隐藏（界面即纯网页，无任何额外 UI）。
             // 当文件拖入网页时，前端 JS 通过 postMessage 通知显示本层，
             // 由它（纯 WinForms，AllowDrop 可用）接管拖放并取真实路径 → /api/scan 零复制。
             _dropOverlay = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Color.FromArgb(232, 237, 248),
+                BackColor = _ovBackdrop,
                 Visible = false,
                 AllowDrop = true
             };
@@ -448,13 +456,13 @@ namespace LanJinCiLauncher
             _dropCard = new Panel
             {
                 Size = new Size(540, 300),
-                BackColor = Color.White,
+                BackColor = _ovCard,
                 AllowDrop = true
             };
             _dropCard.Paint += (s, pe) =>
             {
                 pe.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var pen = new Pen(Color.FromArgb(79, 110, 247), 2f))
+                using (var pen = new Pen(_ovAccent, 2f))
                 {
                     pen.DashStyle = DashStyle.Dash;
                     var r = new Rectangle(2, 2, _dropCard.Width - 5, _dropCard.Height - 5);
@@ -475,43 +483,43 @@ namespace LanJinCiLauncher
             try { ovIcon.Image = Icon.ExtractAssociatedIcon(Application.ExecutablePath).ToBitmap(); }
             catch (Exception) { /* 图标缺失时忽略 */ }
 
-            var ovTitle = new Label
+            _ovTitle = new Label
             {
                 Text = "松开鼠标，开始检测",
                 Bounds = new Rectangle(0, 108, _dropCard.Width, 42),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Microsoft YaHei UI", 20F, FontStyle.Bold),
-                ForeColor = Color.FromArgb(28, 35, 51),
+                ForeColor = _ovInk,
                 AllowDrop = true
             };
-            var ovSub = new Label
+            _ovSub = new Label
             {
                 Text = "可拖入多个视频 / 音频文件，或整个文件夹（自动扫描其中媒体）",
                 Bounds = new Rectangle(24, 160, _dropCard.Width - 48, 32),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Microsoft YaHei UI", 12F),
-                ForeColor = Color.FromArgb(91, 100, 120),
+                ForeColor = _ovInk2,
                 AllowDrop = true
             };
-            var ovFmt = new Label
+            _ovFmt = new Label
             {
                 Text = "mp4 · mov · mkv · avi · mp3 · wav · m4a 等 · 零复制 · 支持整个文件夹",
                 Bounds = new Rectangle(24, 198, _dropCard.Width - 48, 26),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Microsoft YaHei UI", 10F),
-                ForeColor = Color.FromArgb(150, 158, 176),
+                ForeColor = _ovInk3,
                 AllowDrop = true
             };
 
             _dropCard.Controls.Add(ovIcon);
-            _dropCard.Controls.Add(ovTitle);
-            _dropCard.Controls.Add(ovSub);
-            _dropCard.Controls.Add(ovFmt);
+            _dropCard.Controls.Add(_ovTitle);
+            _dropCard.Controls.Add(_ovSub);
+            _dropCard.Controls.Add(_ovFmt);
             _dropOverlay.Controls.Add(_dropCard);
             _dropOverlay.Resize += (s, e) => CenterDropCard();
 
             // 所有子控件都挂同一组拖放事件（OLE 目标按 HWND 查找，子控件也要注册）
-            foreach (var c in new Control[] { _dropOverlay, _dropCard, ovIcon, ovTitle, ovSub, ovFmt })
+            foreach (var c in new Control[] { _dropOverlay, _dropCard, ovIcon, _ovTitle, _ovSub, _ovFmt })
             {
                 c.DragEnter += OnOverlayDragEnter;
                 c.DragDrop += OnOverlayDragDrop;
@@ -606,7 +614,8 @@ namespace LanJinCiLauncher
                 e.Handled = true;
                 try { cw.Navigate(e.Uri); } catch (Exception) { }
             };
-            // 前端通知：文件拖入网页 → 立即显示全窗原生覆盖层接管拖放
+            // 前端通知：文件拖入网页 → 立即显示全窗原生覆盖层接管拖放；
+            // theme-dark / theme-light → 让覆盖层跟随网页主题切换
             cw.WebMessageReceived += (s, e) =>
             {
                 try
@@ -614,6 +623,8 @@ namespace LanJinCiLauncher
                     string msg = e.TryGetWebMessageAsString();
                     if (msg == "native-drag-enter")
                         ShowDropOverlay();
+                    else if (msg == "theme-dark") { _overlayDark = true; ApplyOverlayTheme(); }
+                    else if (msg == "theme-light") { _overlayDark = false; ApplyOverlayTheme(); }
                 }
                 catch (Exception) { /* JSON 消息走 TryGet 会抛异常，忽略 */ }
             };
@@ -674,6 +685,7 @@ namespace LanJinCiLauncher
         private void ShowDropOverlay()
         {
             if (InvokeRequired) { BeginInvoke((Action)ShowDropOverlay); return; }
+            ApplyOverlayTheme();  // 显示前确保颜色与当前主题一致
             CenterDropCard();
             _dropOverlay.Visible = true;
             _dropOverlay.BringToFront();
@@ -704,6 +716,77 @@ namespace LanJinCiLauncher
         {
             using (var path = RoundedRect(new Rectangle(0, 0, c.Width, c.Height), radius))
                 c.Region = new Region(path);
+        }
+
+        // ------------------------- 拖放覆盖层主题（浅色/深色） -------------------------
+        private void ResolveOverlayColors()
+        {
+            if (_overlayDark)
+            {
+                _ovBackdrop = Color.FromArgb(20, 22, 28);
+                _ovCard = Color.FromArgb(30, 33, 41);
+                _ovAccent = Color.FromArgb(106, 131, 255);
+                _ovInk = Color.FromArgb(231, 234, 242);
+                _ovInk2 = Color.FromArgb(166, 173, 189);
+                _ovInk3 = Color.FromArgb(109, 116, 132);
+            }
+            else
+            {
+                _ovBackdrop = Color.FromArgb(232, 237, 248);
+                _ovCard = Color.White;
+                _ovAccent = Color.FromArgb(79, 110, 247);
+                _ovInk = Color.FromArgb(28, 35, 51);
+                _ovInk2 = Color.FromArgb(91, 100, 120);
+                _ovInk3 = Color.FromArgb(150, 158, 176);
+            }
+        }
+
+        private void ApplyOverlayTheme()
+        {
+            ResolveOverlayColors();
+            if (InvokeRequired) { BeginInvoke((Action)ApplyOverlayTheme); return; }
+            if (_dropOverlay != null) _dropOverlay.BackColor = _ovBackdrop;
+            if (_dropCard != null) { _dropCard.BackColor = _ovCard; _dropCard.Invalidate(); }
+            if (_ovTitle != null) _ovTitle.ForeColor = _ovInk;
+            if (_ovSub != null) _ovSub.ForeColor = _ovInk2;
+            if (_ovFmt != null) _ovFmt.ForeColor = _ovInk3;
+        }
+
+        private bool ResolveInitialDark()
+        {
+            try
+            {
+                var settingsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data", "settings.json");
+                if (File.Exists(settingsPath))
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(
+                        File.ReadAllText(settingsPath, Encoding.UTF8), "\"theme\"\\s*:\\s*\"([a-z]+)\"");
+                    if (m.Success)
+                    {
+                        var t = m.Groups[1].Value;
+                        if (t == "dark") return true;
+                        if (t == "light") return false;
+                    }
+                }
+            }
+            catch (Exception) { }
+            return IsSystemDark();
+        }
+
+        private static bool IsSystemDark()
+        {
+            try
+            {
+                using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                {
+                    if (k == null) return false;
+                    object val = k.GetValue("AppsUseLightTheme");
+                    if (val is int) return ((int)val) == 0;
+                }
+                return false;
+            }
+            catch (Exception) { return false; }
         }
 
         private void HideDropOverlay()
