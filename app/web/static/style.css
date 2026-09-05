@@ -429,18 +429,13 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 24px 80px; }
 .muted { color: var(--ink-2); }
 .small { font-size: 12px; }
 
-/* ---------- 悬浮提示（统一 tooltip） ---------- */
+/* ---------- 悬浮提示（统一 tooltip：JS 全局 fixed，避免被 overflow 裁剪） ---------- */
 [data-tip] { position: relative; }
-[data-tip]:hover::after {
-  content: attr(data-tip);
-  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+.gtip {
+  position: fixed; z-index: 5000; pointer-events: none;
   background: var(--toast-bg); color: #fff; font-size: 12px; line-height: 1.5;
-  padding: 6px 10px; border-radius: 8px; white-space: normal; max-width: 320px; text-align: left;
-  box-shadow: var(--shadow-lg); z-index: 120; pointer-events: none; animation: fadeIn .15s ease;
-}
-[data-tip]:hover::before {
-  content: ""; position: absolute; bottom: calc(100% + 2px); left: 50%; transform: translateX(-50%);
-  border: 6px solid transparent; border-top-color: var(--toast-bg); z-index: 121; pointer-events: none;
+  padding: 6px 10px; border-radius: 8px; white-space: normal; max-width: 320px;
+  text-align: left; box-shadow: var(--shadow-lg); animation: fadeIn .12s ease;
 }
 
 /* ---------- 首次使用引导 ---------- */

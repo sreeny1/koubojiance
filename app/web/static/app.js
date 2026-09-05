@@ -66,6 +66,35 @@ function busy(on, text) {
   if (text) $("#busyText").textContent = text;
 }
 
+/* ========================= 悬浮提示（JS 全局 fixed，避免被裁剪） ========================= */
+function initTooltip() {
+  const gtip = $("#gtip");
+  function showTip(el) {
+    const text = el.getAttribute("data-tip");
+    if (!text) { gtip.hidden = true; return; }
+    gtip.textContent = text;
+    gtip.hidden = false;
+    const r = el.getBoundingClientRect();
+    const tw = gtip.offsetWidth, th = gtip.offsetHeight;
+    let x = Math.round(r.left + r.width / 2 - tw / 2);
+    let y = Math.round(r.top - th - 8);
+    if (y < 6) y = Math.round(r.bottom + 8);          // 上方放不下，放下方
+    if (x < 6) x = 6;
+    if (x + tw > window.innerWidth - 6) x = window.innerWidth - tw - 6;
+    gtip.style.left = x + "px";
+    gtip.style.top = y + "px";
+  }
+  document.addEventListener("mouseover", (e) => {
+    const el = e.target.closest("[data-tip]");
+    if (el) showTip(el);
+    else if (!e.target.closest("#gtip")) gtip.hidden = true;
+  });
+  document.addEventListener("mouseout", (e) => {
+    const el = e.target.closest("[data-tip]");
+    if (el && !el.contains(e.relatedTarget)) gtip.hidden = true;
+  });
+}
+
 /* ========================= 主题（浅色/深色/跟随系统） ========================= */
 const THEME_KEY = "theme";
 function resolveTheme(t) {
@@ -995,6 +1024,7 @@ $("#welcomeModal").addEventListener("click", (e) => {
 /* ========================= 启动 ========================= */
 (async function init() {
   initTheme();
+  initTooltip();
   await refreshAll(true);
   schedulePoll();
   scheduleTaskPoll();

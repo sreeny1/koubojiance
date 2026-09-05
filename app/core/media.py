@@ -57,6 +57,17 @@ def probe_duration_ms(path: str | Path) -> int | None:
         return None
 
 
+def has_audio_stream(path: str | Path) -> bool:
+    """媒体是否含音频轨。失败时保守返回 True（不阻断，交由后续流程报错）。"""
+    try:
+        import av
+
+        with av.open(str(path)) as container:
+            return any(s.type == "audio" for s in container.streams)
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def extract_audio_wav(src: str | Path, dst: str | Path) -> bool:
     """用 ffmpeg 抽取 16kHz 单声道 WAV。成功返回 True。
 

@@ -284,11 +284,19 @@ class WhisperEngine:
 
         返回格式：[{"start": 秒, "end": 秒, "text": str}, ...]
         """
-        from .media import extract_audio_wav, probe_duration_ms
+        from .media import extract_audio_wav, has_audio_stream, probe_duration_ms
 
-        model = self.get_model()
         src = str(media_path)
         duration = probe_duration_ms(src)
+
+        # 无音频轨的视频（如纯画面/无声音素材）无法转写语音，直接视为"无语音内容"，
+        # 返回空字幕而非抛异常（界面会显示"未识别到语音内容"，而不是"转写失败"）。
+        # 放在加载模型之前，避免为这类视频白白加载数 GB 模型。
+        if not has_audio_stream(src):
+            log.info("媒体无音轨，跳过转写：%s", src)
+            return []
+
+        model = self.get_model()
 
         lang = self._settings.get("language", "zh")
         kwargs: dict = dict(
