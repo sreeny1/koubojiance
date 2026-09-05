@@ -43,9 +43,9 @@
     <div class="statsbar" id="statsBar">
       <div class="stats" id="statsText">—</div>
       <div class="stats-actions">
-        <button class="btn btn-sm" id="btnRedetect" title="词库变更后，对已转写视频重新检索（无需重新转写）">重新检测</button>
-        <button class="btn btn-sm btn-primary" id="btnExport">导出 Excel 报告</button>
-        <button class="btn btn-sm btn-danger" id="btnClearList" title="一键清空全部检测数据（保留词库和设置）">一键清除列表</button>
+        <button class="btn btn-sm" id="btnRedetect" data-tip="词库变更后，对已转写视频重新检索，无需重新转写">重新检测</button>
+        <button class="btn btn-sm btn-primary" id="btnExport" data-tip="导出全部视频的违禁词明细 Excel 报告">导出 Excel 报告</button>
+        <button class="btn btn-sm btn-danger" id="btnClearList" data-tip="清空全部检测记录和字幕（保留词库与设置，不删除原始视频）">一键清除列表</button>
       </div>
     </div>
 
@@ -140,6 +140,13 @@
         <label>并发任务数
           <input id="setWorkers" type="number" min="1" max="8" value="1">
         </label>
+        <label>界面主题
+          <select id="setTheme">
+            <option value="system">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </label>
         <label class="wide">模型下载源
           <input id="setHfEndpoint" placeholder="留空=官方源；国内可填 https://hf-mirror.com">
         </label>
@@ -176,6 +183,25 @@
       <div class="pm-subs-wrap">
         <div class="pm-subs-head">完整字幕（点击任意句跳转）</div>
         <div class="pm-subs" id="pmSubs"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 首次使用引导 -->
+<div class="modal welcome-modal" id="welcomeModal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <div class="modal-title">欢迎使用口播违禁词检测</div>
+    </div>
+    <div class="welcome-body">
+      <div class="welcome-steps">
+        <div class="welcome-step"><span class="no">1</span><div class="tx"><b>拖入视频 / 音频</b><span>把文件或整个文件夹拖进窗口，自动本地转写字幕（数据不出本机）</span></div></div>
+        <div class="welcome-step"><span class="no">2</span><div class="tx"><b>查看违禁词命中</b><span>自动检索广告法极限词、医疗功效、金融风险、平台违禁等敏感词</span></div></div>
+        <div class="welcome-step"><span class="no">3</span><div class="tx"><b>定位或一键去除</b><span>点击命中即跳转回放；勾选后「去除所选」可剪掉对应片段（仅 mp4）</span></div></div>
+      </div>
+      <div class="welcome-actions">
+        <button class="btn btn-primary" id="btnWelcomeClose">开始使用</button>
       </div>
     </div>
   </div>

@@ -58,6 +58,25 @@ function busy(on, text) {
   if (text) $("#busyText").textContent = text;
 }
 
+/* ========================= 主题（浅色/深色/跟随系统） ========================= */
+const THEME_KEY = "theme";
+function resolveTheme(t) {
+  if (t === "light" || t === "dark") return t;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function applyTheme(t) {
+  document.documentElement.dataset.theme = resolveTheme(t);
+  try { localStorage.setItem(THEME_KEY, t); } catch (_) {}
+}
+function initTheme() {
+  let saved = "system";
+  try { saved = localStorage.getItem(THEME_KEY) || "system"; } catch (_) {}
+  applyTheme(saved);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    try { if ((localStorage.getItem(THEME_KEY) || "system") === "system") applyTheme("system"); } catch (_) {}
+  });
+}
+
 /* 在句子里高亮命中的原文片段 */
 function markSentence(sentence, matched) {
   const s = esc(sentence);
@@ -268,11 +287,11 @@ function renderVideoList(videos) {
         </div>
         ${pills}
         <span class="badge ${status}">${statusText}</span>
-        <button class="btn btn-xs" data-act="retest">重测</button>
-        ${v.seg_count ? `<button class="btn btn-xs" data-act="srt">SRT</button>` : ""}
-        ${v.hits.length && (v.path || "").toLowerCase().endsWith(".mp4") ? `<button class="btn btn-xs btn-primary" data-act="cut" title="去除勾选的违禁词片段：原文件自动备份，成品文件名不变">去除所选</button>` : ""}
-        <button class="btn btn-xs btn-danger" data-act="del">删除</button>
-        <button class="btn btn-xs btn-danger" data-act="delfile" title="删除该文件到回收站（可恢复），同时移除本记录">删除文件</button>
+        <button class="btn btn-xs" data-act="retest" data-tip="重新转写并检测该视频">重测</button>
+        ${v.seg_count ? `<button class="btn btn-xs" data-act="srt" data-tip="下载该视频的 SRT 字幕文件">SRT</button>` : ""}
+        ${v.hits.length && (v.path || "").toLowerCase().endsWith(".mp4") ? `<button class="btn btn-xs btn-primary" data-act="cut" data-tip="去除勾选的违禁词片段：原文件自动备份到同目录，成品文件名不变（仅 mp4）">去除所选</button>` : ""}
+        <button class="btn btn-xs btn-danger" data-act="del" data-tip="删除该视频的检测记录（不删除磁盘上的视频文件）">删除</button>
+        <button class="btn btn-xs btn-danger" data-act="delfile" data-tip="把该视频文件移入回收站（可恢复），并移除本记录">删除文件</button>
       </div>
       <div class="vcard-body">${body}</div>
     </div>`;
@@ -747,8 +766,12 @@ async function loadSettings() {
   $("#setCompute").value = s.compute_type;
   $("#setLanguage").value = s.language;
   $("#setWorkers").value = s.max_workers;
+  $("#setTheme").value = s.theme || "system";
   $("#setHfEndpoint").value = s.hf_endpoint || "";
+  if (s.theme) applyTheme(s.theme);  // 以服务端设置为准（首次打开无 localStorage 时也正确）
 }
+
+$("#setTheme").addEventListener("change", (e) => applyTheme(e.target.value));
 
 $("#btnSaveSettings").addEventListener("click", async () => {
   const payload = {
@@ -757,6 +780,7 @@ $("#btnSaveSettings").addEventListener("click", async () => {
     compute_type: $("#setCompute").value,
     language: $("#setLanguage").value,
     max_workers: Number($("#setWorkers").value) || 1,
+    theme: $("#setTheme").value,
     hf_endpoint: $("#setHfEndpoint").value.trim(),
   };
   try {
@@ -848,9 +872,28 @@ async function pollTaskProgress() {
   } catch (_) {}
 }
 
+/* ========================= 首次使用引导 ========================= */
+function maybeShowWelcome() {
+  let seen = false;
+  try { seen = localStorage.getItem("welcome_seen") === "1"; } catch (_) {}
+  if (seen) return;
+  const videos = (state.results?.stats?.videos) || 0;
+  if (videos > 0) return;  // 已有记录说明不是首次
+  $("#welcomeModal").hidden = false;
+}
+$("#btnWelcomeClose").addEventListener("click", () => {
+  $("#welcomeModal").hidden = true;
+  try { localStorage.setItem("welcome_seen", "1"); } catch (_) {}
+});
+$("#welcomeModal").addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) $("#btnWelcomeClose").click();
+});
+
 /* ========================= 启动 ========================= */
 (async function init() {
+  initTheme();
   await refreshAll(true);
   schedulePoll();
   scheduleTaskPoll();
+  maybeShowWelcome();
 })();

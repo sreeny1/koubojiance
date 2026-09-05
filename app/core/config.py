@@ -39,6 +39,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "max_workers": 1,
     # HuggingFace 模型下载源。留空=官方源；国内网络不通时可填 https://hf-mirror.com
     "hf_endpoint": "",
+    # 界面主题：system(跟随系统) / light(浅色) / dark(深色)
+    "theme": "system",
     # 同时显示/检索的默认违禁词分类
     "ui": {
         "accent": "#4f6ef7",
