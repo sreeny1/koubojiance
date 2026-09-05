@@ -127,6 +127,9 @@ namespace LanJinCiLauncher
                     CreateNoWindow = true,
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
+                // 便携解释器隔离：忽略用户目录 site-packages（避免冲突包），统一 UTF-8（中文路径稳健）
+                psi.EnvironmentVariables["PYTHONNOUSERSITE"] = "1";
+                psi.EnvironmentVariables["PYTHONUTF8"] = "1";
                 _proc = Process.Start(psi);
                 _running = true;
                 _notified = false;
