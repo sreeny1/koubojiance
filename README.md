@@ -1,6 +1,6 @@
 # 口播违禁词检测
 
-> **当前版本：v1.4.0**（版本号见 `app/core/config.py` 的 `APP_VERSION`，界面顶栏同步显示；每次功能/修复发布递增）
+> **当前版本：v1.5.0**（版本号见 `app/core/config.py` 的 `APP_VERSION`，界面顶栏同步显示；每次功能/修复发布递增）
 
 > **绿色便捷版（v1.4.0）**：软件包仅约 150MB——whisper 模型与 NVIDIA CUDA 运行库全部改为**首次启动自动下载**（国内高速源：模型走 ModelScope，CUDA 库走清华/阿里/腾讯 PyPI 镜像；断点续传 + 文件清单 + 大小/SHA256 校验，保证完整不遗漏）。AMD/Intel 机器首次启动只需下载模型，NVIDIA 机器额外自动补 CUDA 库后启用 GPU 加速。
 

@@ -136,8 +136,8 @@ def results():
     db = get_db()
     videos = db.query(
         """
-        SELECT v.id, v.filename, v.path, v.duration_ms, v.created_at,
-               v.transcribed_at,
+        SELECT v.id, v.filename, v.path, v.duration_ms, v.file_deleted,
+               v.created_at, v.transcribed_at,
                (SELECT t.status FROM tasks t WHERE t.video_id = v.id
                 ORDER BY t.id DESC LIMIT 1) AS task_status,
                (SELECT COUNT(*) FROM hits h WHERE h.video_id = v.id) AS hit_count,
@@ -231,16 +231,25 @@ def video_srt(video_id: int):
 
 @router.delete("/videos/{video_id}")
 def delete_video(video_id: int, remove_file: bool = False):
-    """删除某条检测记录；remove_file=True 时把磁盘上的原始文件移入回收站。"""
+    """删除操作（两种模式，逻辑分离）：
+
+    - remove_file=True  （「删除文件」）：把磁盘原始文件移入回收站（可恢复），
+      **转写/字幕/命中记录全部保留**，仅把 videos.file_deleted 标记为 1；
+    - remove_file=False （「删除」）：只删除检测记录（任务/字幕/命中/视频记录），
+      不碰磁盘文件。
+    """
     db = get_db()
-    video = db.query_one("SELECT id, path FROM videos WHERE id=?", (video_id,))
+    video = db.query_one(
+        "SELECT id, path, filename, file_deleted FROM videos WHERE id=?", (video_id,)
+    )
     if not video:
         raise HTTPException(404, "视频不存在")
 
-    removed_file = False
     if remove_file:
+        # ---- 只删文件 + 标记，保留转写记录 ----
         from core.media import send_to_recycle_bin
         p = Path(video["path"])
+        removed_file = False
         if not p.exists():
             removed_file = True  # 文件早已不在磁盘，视为已删除
         elif send_to_recycle_bin(p):
@@ -249,13 +258,20 @@ def delete_video(video_id: int, remove_file: bool = False):
             raise HTTPException(
                 409, f"文件正被占用或删除失败，已取消操作：{p.name}"
             )
+        db.execute("UPDATE videos SET file_deleted=1 WHERE id=?", (video_id,))
+        log.info("已删除文件（记录保留并标记）: 视频 #%s %s（removed_file=%s）",
+                 video_id, video["filename"], removed_file)
+        return {"ok": True, "removed_file": removed_file,
+                "kept_records": True, "file_deleted": 1}
 
+    # ---- 只删记录（不动文件） ----
     with db.tx() as conn:
         conn.execute("DELETE FROM hits WHERE video_id=?", (video_id,))
         conn.execute("DELETE FROM segments WHERE video_id=?", (video_id,))
         conn.execute("DELETE FROM tasks WHERE video_id=?", (video_id,))
         conn.execute("DELETE FROM videos WHERE id=?", (video_id,))
-    return {"ok": True, "removed_file": removed_file}
+    log.info("已删除检测记录（文件保留）: 视频 #%s %s", video_id, video["filename"])
+    return {"ok": True, "removed_file": False}
 
 
 # ----------------------------------------------------------------------

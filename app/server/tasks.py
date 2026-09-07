@@ -207,6 +207,10 @@ class TaskManager:
         if not video:
             self._finish(task_id, "error", "视频记录不存在")
             return
+        if video.get("file_deleted"):
+            self._finish(task_id, "error",
+                         "原文件已删除（转写记录已保留），如需重新转写请恢复文件或重新导入")
+            return
         if not Path(video["path"]).exists():
             self._finish(task_id, "error", f"文件不存在：{video['path']}")
             return
@@ -308,10 +312,19 @@ class TaskManager:
         new_task_ids: list[int] = []
         for f in sorted(uniq):
             video = self.db.query_one(
-                "SELECT id FROM videos WHERE path=?", (str(f),)
+                "SELECT id, file_deleted FROM videos WHERE path=?", (str(f),)
             )
             if video:
                 vid = video["id"]
+                # 文件删除标记的记录：磁盘文件回来了→重置标记继续用；仍无文件→跳过
+                if video.get("file_deleted"):
+                    if not f.exists():
+                        log.debug("记录已标记文件删除且文件不存在，跳过: %s", f)
+                        continue
+                    self.db.execute(
+                        "UPDATE videos SET file_deleted=0 WHERE id=?", (vid,)
+                    )
+                    log.info("文件已恢复/重新导入，清除文件删除标记: 视频 #%s", vid)
                 # 已有排队/进行中的任务则不重复建（避免同一视频重复转写）
                 pending = self.db.query_one(
                     "SELECT id FROM tasks WHERE video_id=? "

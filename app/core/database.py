@@ -19,7 +19,7 @@ from .config import DB_PATH
 
 log = logging.getLogger("database")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS videos (
     path TEXT UNIQUE NOT NULL,          -- 磁盘绝对路径
     filename TEXT NOT NULL,
     duration_ms INTEGER,                -- 转写后回填
+    file_deleted INTEGER NOT NULL DEFAULT 0,  -- 文件已移入回收站（转写记录保留，仅标记）
     created_at TEXT DEFAULT (datetime('now','localtime')),
     transcribed_at TEXT                 -- 最近一次转写完成时间
 );
@@ -142,6 +143,7 @@ class Database:
     def _init_schema(self) -> None:
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            self._migrate()
             row = self._conn.execute(
                 "SELECT value FROM meta WHERE key='schema_version'"
             ).fetchone()
@@ -152,6 +154,26 @@ class Database:
                 )
                 self._conn.commit()
                 self._seed_words()
+            else:
+                self._conn.execute(
+                    "UPDATE meta SET value=? WHERE key='schema_version'",
+                    (str(SCHEMA_VERSION),),
+                )
+                self._conn.commit()
+
+    def _migrate(self) -> None:
+        """旧库平滑升级（ALTER TABLE 幂等，新库建表已含新列则跳过）。"""
+        # v1 → v2：videos 增加 file_deleted（删除文件但保留转写记录的标记）
+        try:
+            cols = {r["name"] for r in self._conn.execute(
+                "PRAGMA table_info(videos)").fetchall()}
+            if "file_deleted" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE videos ADD COLUMN "
+                    "file_deleted INTEGER NOT NULL DEFAULT 0")
+                log.info("数据库迁移 v1→v2：videos.file_deleted 已添加")
+        except Exception as e:  # noqa: BLE001
+            log.warning("数据库迁移 file_deleted 失败（忽略）: %s", e)
 
     def _seed_words(self) -> None:
         """首次建库时写入种子违禁词（词库为空才写，避免覆盖用户数据）。"""

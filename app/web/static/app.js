@@ -370,12 +370,13 @@ function renderVideoList(videos) {
           <span class="sub">${fmtDur(v.duration_ms)} · ${v.seg_count || 0} 句字幕${v.transcribed_at ? ` · 检测于 ${esc(v.transcribed_at)}` : ""}</span>
         </div>
         ${pills}
+        ${v.file_deleted ? `<span class="badge deleted" data-tip="文件已移入回收站，转写记录已保留">文件已删除</span>` : ""}
         <span class="badge ${status}">${statusText}</span>
-        <button class="btn btn-xs" data-act="retest" data-tip="重新转写并检测该视频">重测</button>
+        ${v.file_deleted ? "" : `<button class="btn btn-xs" data-act="retest" data-tip="重新转写并检测该视频">重测</button>`}
         ${v.seg_count ? `<button class="btn btn-xs" data-act="srt" data-tip="下载该视频的 SRT 字幕文件">SRT</button>` : ""}
-        ${v.hits.length && (v.path || "").toLowerCase().endsWith(".mp4") ? `<button class="btn btn-xs btn-primary" data-act="cut" data-tip="去除勾选的违禁词片段：原文件自动备份到同目录，成品文件名不变（仅 mp4）">去除所选</button>` : ""}
-        <button class="btn btn-xs btn-danger" data-act="del" data-tip="删除该视频的检测记录（不删除磁盘上的视频文件）">删除</button>
-        <button class="btn btn-xs btn-danger" data-act="delfile" data-tip="把该视频文件移入回收站（可恢复），并移除本记录">删除文件</button>
+        ${v.hits.length && !v.file_deleted && (v.path || "").toLowerCase().endsWith(".mp4") ? `<button class="btn btn-xs btn-primary" data-act="cut" data-tip="去除勾选的违禁词片段：原文件自动备份到同目录，成品文件名不变（仅 mp4）">去除所选</button>` : ""}
+        <button class="btn btn-xs btn-danger" data-act="del" data-tip="删除该视频的检测记录（不删除磁盘上的视频文件，字幕/命中一并删除）">删除</button>
+        ${v.file_deleted ? `<button class="btn btn-xs" data-act="delfile" disabled title="文件已删除">文件已删除</button>` : `<button class="btn btn-xs btn-danger" data-act="delfile" data-tip="把该视频文件移入回收站（可恢复），转写记录保留并标记">删除文件</button>`}
       </div>
       <div class="vcard-body">${body}</div>
     </div>`;
@@ -451,13 +452,13 @@ $("#videoList").addEventListener("click", async (e) => {
     refreshAll(true);
   } else if (btn.dataset.act === "delfile") {
     if (!confirm(
-      `将「${v.filename}」的磁盘文件移入回收站（可恢复），并移除本检测记录。\n\n` +
+      `将「${v.filename}」的磁盘文件移入回收站（可恢复）。\n\n` +
       `文件路径：${v.path}\n\n` +
-      `注意：此操作会删除本地原始文件（可在回收站找回），确认？`
+      `转写/字幕/命中记录会保留，并标记为「文件已删除」（仍可查看检测结果）。确认删除文件？`
     )) return;
     try {
       const r = await api("DELETE", `/api/videos/${vid}?remove_file=1`);
-      toast(r.removed_file ? "已删除文件到回收站，记录已移除" : "记录已移除（文件已不在磁盘）");
+      toast(r.removed_file ? "文件已移入回收站，转写记录已保留" : "文件已不在磁盘（记录已保留）");
     } catch (err) { toast(err.message, true); }
     refreshAll(true);
   }
@@ -554,10 +555,18 @@ async function openPlayer(videoId, hitIdx = null) {
 
   const hits = [];
   data.segments.forEach((s) => s.hits.forEach((h) => hits.push({ ...h, segment: s })));
-  state.player = { videoId, videoName: data.video.filename, hits, hitIdx, segments: data.segments };
+  const fileDeleted = !!data.video.file_deleted;
+  state.player = { videoId, videoName: data.video.filename, hits, hitIdx, segments: data.segments, fileDeleted };
 
   $("#pmTitle").textContent = data.video.filename;
-  $("#pmVideo").src = `/api/videos/${videoId}/stream`;
+  $("#pmFileDeleted").hidden = !fileDeleted;
+  const pv = $("#pmVideo");
+  if (fileDeleted) {
+    pv.removeAttribute("src");
+    pv.load();
+  } else {
+    pv.src = `/api/videos/${videoId}/stream`;
+  }
   $("#playerModal").hidden = false;
   document.body.style.overflow = "hidden";
 
@@ -617,6 +626,12 @@ function hitsMarkedSegment(seg) {
 function seekToHit(idx) {
   const p = state.player;
   if (!p || !p.hits.length) return;
+  if (p.fileDeleted) {
+    p.hitIdx = Math.max(0, Math.min(p.hits.length - 1, idx));
+    renderPlayerHits();
+    toast("文件已删除，仅可查看字幕与命中记录");
+    return;
+  }
   idx = Math.max(0, Math.min(p.hits.length - 1, idx));
   p.hitIdx = idx;
   const h = p.hits[idx];
@@ -637,6 +652,7 @@ $("#pmSubs").addEventListener("click", (e) => {
   if (!row) return;
   const seg = state.player.segments.find((s) => s.idx === Number(row.dataset.seg));
   if (seg) {
+    if (state.player.fileDeleted) { toast("文件已删除，仅可查看字幕与命中记录"); return; }
     $("#pmVideo").currentTime = seg.start_ms / 1000;
     $("#pmVideo").play().catch(() => {});
   }
@@ -665,6 +681,7 @@ function closePlayer() {
   v.pause();
   v.removeAttribute("src");
   v.load();
+  $("#pmFileDeleted").hidden = true;
   $("#playerModal").hidden = true;
   document.body.style.overflow = "";
   state.player = null;

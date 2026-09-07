@@ -28,7 +28,7 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 
 # ---- 应用版本（每次发布更新此号；界面/日志/状态接口统一读取）----
 APP_NAME = "口播违禁词检测"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     # 转写模型：large-v3 准确率最高；备选 medium / small / large-v3-turbo（更快）

@@ -461,6 +461,13 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 24px 80px; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
+/* ---------- 文件已删除（保留转写记录） ---------- */
+.badge.deleted { background: var(--surface-2); color: var(--ink-3); border: 1px dashed var(--line); }
+.pm-file-deleted {
+  margin: 8px 0; padding: 9px 12px; border-radius: 8px;
+  background: var(--danger-soft); color: var(--danger); font-size: 13px; line-height: 1.5;
+}
+
 /* ---------- 日志查看 ---------- */
 .logview {
   margin: 10px 0 0; padding: 10px 12px; max-height: 320px; overflow: auto;
