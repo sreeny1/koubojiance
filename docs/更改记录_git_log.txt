@@ -1,4 +1,6 @@
-﻿39f9151 2026-09-07 fix(transcribe): 转写加全局互斥锁串行化原生推理，避免多任务并发导致服务崩溃(Failed to fetch)
+5ea5b52 2026-09-07 feat(log): 详细日志模式——服务端/前端/启动器日志统一写入软件根目录 logs/，含DEBUG开关与日志查看/打开目录
+f3e8634 2026-09-07 docs: 固化项目交接与对话记录/更新开发日志与开发文档/导出git变更记录
+39f9151 2026-09-07 fix(transcribe): 转写加全局互斥锁串行化原生推理，避免多任务并发导致服务崩溃(Failed to fetch)
 574e43a 2026-09-07 fix(transcriber): 仅在线下载时才切换镜像，本地模型加载失败不误切
 20a111b 2026-09-07 fix(model): 按模型实际文件集下载/判定就绪——large-v3需vocabulary.json、small/medium需vocabulary.txt，避免词表缺失导致转写失败
 98e8bb0 2026-09-05 fix(download): 修进度恒0/卡0%——按模型实际文件集下载、去掉下载式测速、进度用overall/frac并显示真实体积
