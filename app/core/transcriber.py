@@ -60,6 +60,10 @@ class WhisperEngine:
         self._settings = settings
         self._model = None
         self._lock = threading.Lock()
+        # 转写全局互斥：同一时间内只允许一个视频做原生推理。
+        # ctranslate2/faster-whisper 并发调用同一模型实例可能原生崩溃（无法被 try/except 捕获，
+        # 会把整个服务进程带崩），尤其在 GPU 上多个任务并行时。串行化是最稳妥的保障。
+        self._transcribe_lock = threading.Lock()
         # 模型下载协调：任意时刻至多一个线程在下载；同目标等待共享，不同目标串行
         self._dl_cond = threading.Condition()
         self._dl_target: str | None = None
@@ -302,48 +306,49 @@ class WhisperEngine:
             log.info("媒体无音轨，跳过转写：%s", src)
             return []
 
-        model = self.get_model()
+        with self._transcribe_lock:
+            model = self.get_model()
+            log.info("开始转写：%s（时长 %sms，设备 %s/%s）",
+                     src, duration or 0, self.effective.get("device"),
+                     self.effective.get("compute_type"))
 
-        lang = self._settings.get("language", "zh")
-        kwargs: dict = dict(
-            language=None if lang == "auto" else lang,
-            beam_size=5,
-            vad_filter=True,                    # 跳过静音/背景音乐段
-            vad_parameters=dict(min_silence_duration_ms=500),
-            condition_on_previous_text=False,   # 防止坏音频引起重复循环
-        )
-        # 注意：不要加 initial_prompt 引导中文标点——实测它会诱发 whisper
-        # 对部分音频提前终止解码，导致中段语音整段丢失（缺 20~30 秒字幕）。
-        # 标点缺失只是观感问题，用句级切分的硬切兜底即可。
+            lang = self._settings.get("language", "zh")
+            kwargs: dict = dict(
+                language=None if lang == "auto" else lang,
+                beam_size=5,
+                vad_filter=True,                # 跳过静音/背景音乐段
+                vad_parameters=dict(min_silence_duration_ms=500),
+                condition_on_previous_text=False,  # 防止坏音频引起重复循环
+            )
 
-        try:
-            segments_iter, info = model.transcribe(src, **kwargs)
-        except Exception as e:  # noqa: BLE001
-            # 个别格式 PyAV 解不开时，用 ffmpeg 抽轨后重试一次
-            log.warning("直接转写失败(%s)，尝试 ffmpeg 抽音轨: %s", src, e)
-            from .config import DATA_DIR
-
-            wav = DATA_DIR / "media" / f"_tmp_{Path(src).stem[:50]}.wav"
-            if not extract_audio_wav(src, wav):
-                raise RuntimeError(f"音轨解析失败: {e}")
             try:
-                segments_iter, info = model.transcribe(str(wav), **kwargs)
-            finally:
-                wav.unlink(missing_ok=True)
+                segments_iter, info = model.transcribe(src, **kwargs)
+            except Exception as e:  # noqa: BLE001
+                # 个别格式 PyAV 解不开时，用 ffmpeg 抽轨后重试一次
+                log.warning("直接转写失败(%s)，尝试 ffmpeg 抽音轨: %s", src, e)
+                from .config import DATA_DIR
 
-        if duration is None:
-            duration = int((info.duration or 0) * 1000)
+                wav = DATA_DIR / "media" / f"_tmp_{Path(src).stem[:50]}.wav"
+                if not extract_audio_wav(src, wav):
+                    raise RuntimeError(f"音轨解析失败: {e}")
+                try:
+                    segments_iter, info = model.transcribe(str(wav), **kwargs)
+                finally:
+                    wav.unlink(missing_ok=True)
 
-        result: list[dict] = []
-        for seg in segments_iter:  # 生成器：边转写边产出
-            if cancel_check and cancel_check():
-                raise TranscriptionCanceled()
-            result.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
-            if progress and duration > 0:
-                progress(min(0.99, seg.end * 1000 / duration))
-        if progress:
-            progress(1.0)
-        return split_oversized_segments(result)
+            if duration is None:
+                duration = int((info.duration or 0) * 1000)
+
+            result: list[dict] = []
+            for seg in segments_iter:  # 生成器：边转写边产出
+                if cancel_check and cancel_check():
+                    raise TranscriptionCanceled()
+                result.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
+                if progress and duration > 0:
+                    progress(min(0.99, seg.end * 1000 / duration))
+            if progress:
+                progress(1.0)
+            return split_oversized_segments(result)
 
 
 # --------------------------------------------------------------------
