@@ -484,7 +484,7 @@ def save_settings(payload: dict = Body(...)):
     log.info("保存设置: log_level=%s model=%s device=%s compute=%s workers=%s theme=%s",
              merged.get("log_level"), merged.get("model"), merged.get("device"),
              merged.get("compute_type"), merged.get("max_workers"), merged.get("theme"))
-    config.save_settings(merged)
+    merged = config.save_settings(merged)  # 内部归一化（非法模型强制回退）
     get_manager().reload_settings(merged)
     _apply_log_level(merged.get("log_level"))
     return merged

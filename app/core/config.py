@@ -28,10 +28,14 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 
 # ---- 应用版本（每次发布更新此号；界面/日志/状态接口统一读取）----
 APP_NAME = "口播违禁词检测"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
+
+# ---- 支持的转写模型（v1.6.0 起仅保留 large-v3，其它模型弃用）----
+ALLOWED_MODELS: tuple[str, ...] = ("large-v3",)
+DEFAULT_MODEL = "large-v3"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    # 转写模型：large-v3 准确率最高；备选 medium / small / large-v3-turbo（更快）
+    # 转写模型：v1.6.0 起仅支持 large-v3（其它模型已弃用）
     "model": "large-v3",
     # device: auto(自动检测 GPU) / cuda / cpu
     "device": "auto",
@@ -74,7 +78,7 @@ def load_settings() -> dict[str, Any]:
             raise ValueError("settings root is not an object")
         # 以默认值为底合并，保证新增字段有值
         merged = _deep_merge(DEFAULT_SETTINGS, data)
-        return merged
+        return _normalize_settings(merged)
     except Exception as e:  # noqa: BLE001
         backup = SETTINGS_PATH.with_suffix(f".corrupt-{int(time.time())}.bak")
         try:
@@ -90,12 +94,24 @@ def save_settings(settings: dict[str, Any]) -> None:
     """原子写入设置文件（先写临时文件再替换，避免写一半损坏）。"""
     ensure_dirs()
     tmp = SETTINGS_PATH.with_suffix(".tmp")
+    settings = _normalize_settings(dict(settings))
     tmp.write_text(
         json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     os.replace(tmp, SETTINGS_PATH)
     log.info("设置已保存到 %s（%d 个字段，log_level=%s）",
              SETTINGS_PATH, len(settings), settings.get("log_level"))
+    return settings
+
+
+def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """设置归一化：v1.6.0 起仅允许 large-v3 模型，其它模型强制回退。"""
+    if settings.get("model") not in ALLOWED_MODELS:
+        old = settings.get("model")
+        settings["model"] = DEFAULT_MODEL
+        if old and old != DEFAULT_MODEL:
+            log.warning("模型 %s 已弃用，强制回退为 %s", old, DEFAULT_MODEL)
+    return settings
 
 
 def _deep_merge(base: dict, override: dict) -> dict:

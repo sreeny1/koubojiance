@@ -45,19 +45,14 @@ MODEL_FILES = [
 _CORE_FILES = ["model.bin", "config.json", "tokenizer.json"]
 # 词表文件候选（不同模型必有其一；缺失会导致 "Cannot load the vocabulary from the model directory"）
 _VOCAB_FILES = ["vocabulary.json", "vocabulary.txt"]
-# 各模型仓库实际存在的"模型本体"文件（用于界面/手动引导精确展示；.gitattributes/README.md 之外）
+# 各模型仓库实际存在的"模型本体"文件（用于界面/手动引导精确展示）
+# v1.6.0 起仅保留 large-v3（其它模型已弃用）
 _MODEL_FILES_EXPECTED = {
     "large-v3": ["model.bin", "config.json", "tokenizer.json", "vocabulary.json",
                  "preprocessor_config.json", "configuration.json"],
-    "large-v3-turbo": ["model.bin", "config.json", "tokenizer.json", "vocabulary.json",
-                       "preprocessor_config.json", "configuration.json"],  # large-v3 变体，同理
-    "medium": ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt", "configuration.json"],
-    "small": ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt", "configuration.json"],
-    "base": ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt", "configuration.json"],
-    "tiny": ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt", "configuration.json"],
 }
-# ModelScope 已官方镜像的模型尺寸（经 verify_model.py 逐文件核验过大模型）
-MS_AVAILABLE = {"large-v3", "large-v3-turbo", "medium", "small", "base", "tiny"}
+# ModelScope 已官方镜像的模型（经 verify_model.py 逐文件核验过大模型）
+MS_AVAILABLE = {"large-v3"}
 
 
 # ----------------------------------------------------------------------
@@ -133,7 +128,14 @@ def load_local_manifest(name: str) -> list[dict] | None:
     return None
 
 
+def supported_model_names() -> list[str]:
+    """当前支持下载的模型列表（v1.6.0 起仅 large-v3）。"""
+    return sorted(MS_AVAILABLE)
+
+
 def local_model_path(name: str) -> Path:
+    if name not in MS_AVAILABLE:
+        raise ValueError(f"不支持的模型（v1.6.0 起仅支持 large-v3）: {name}")
     return LOCAL_MODELS / name
 
 
@@ -309,19 +311,23 @@ def _initial_files(name: str) -> list[dict]:
 
 
 def any_model_ready() -> bool:
-    """本地是否已有任意一个完整模型（用于区分"首次使用"与"切换模型"）。"""
+    """本地是否已有任意一个**当前支持**的完整模型（用于区分"首次使用"与"切换模型"）。
+
+    v1.6.0 起仅支持 large-v3：已弃用模型（medium/small 等）不参与判定，
+    避免旧数据把"首次下载 large-v3"误显示为"切换模型"。
+    """
     if not LOCAL_MODELS.is_dir():
         return False
     return bool(available_models())
 
 
 def available_models() -> list[str]:
-    """本地已"完整"就绪的模型名列表（用于界面标注"已下载"，避免残缺模型误标）。"""
+    """本地已"完整"就绪且**当前支持**的模型名列表（界面标注"已下载"）。"""
     if not LOCAL_MODELS.is_dir():
         return []
     return sorted(
         d.name for d in LOCAL_MODELS.iterdir()
-        if d.is_dir() and is_model_ready(d.name)
+        if d.is_dir() and d.name in MS_AVAILABLE and is_model_ready(d.name)
     )
 
 
@@ -344,11 +350,6 @@ def _estimate_size(name: str, fname: str) -> int | None:
     est = {
         "large-v3": {"model.bin": 3_087_284_237, "tokenizer.json": 2_480_617,
                      "vocabulary.json": 1_068_114},
-        "large-v3-turbo": {"model.bin": 1_600_000_000},
-        "medium": {"model.bin": 1_500_000_000},
-        "small": {"model.bin": 480_000_000},
-        "base": {"model.bin": 140_000_000},
-        "tiny": {"model.bin": 75_000_000},
     }
     return est.get(name, {}).get(fname)
 
@@ -458,6 +459,8 @@ def download_model(name: str,
                    cancel_check: Callable[[], bool] | None = None,
                    state_cb: Callable[[dict], None] | None = None) -> None:
     """下载完整模型到 data/models/local/<name>/（多源竞速 + 断点续传 + 失败回退）。"""
+    if name not in MS_AVAILABLE:
+        raise ValueError(f"不支持的模型（v1.6.0 起仅支持 large-v3）: {name}")
     target_dir = local_model_path(name)
     if is_model_ready(name):
         if progress:
