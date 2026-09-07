@@ -18,6 +18,7 @@ from core.cutter import (
     backup_original,
     cut_remove_ranges,
     hits_to_remove_ranges,
+    replace_over_target,
 )
 from core.database import Database, get_db
 from core.media import probe_duration_ms
@@ -145,7 +146,8 @@ class CutManager:
             )
             if not tmp.is_file() or tmp.stat().st_size == 0:
                 raise RuntimeError("切割产物为空")
-            os.replace(tmp, src)  # 覆盖原名（同目录原子替换）
+            # 覆盖原名（清只读 + 重试；被占用时给出明确提示，避免 WinError 5）
+            replace_over_target(tmp, src)
             self._progress[job_id] = 1.0
             self._finish(job_id, "done", None)
             self._requeue_transcribe(job["video_id"])

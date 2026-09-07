@@ -497,6 +497,8 @@ async function cutSelected(vid) {
     `· 去词后会自动重新检测一次\n\n确认开始？`
   );
   if (!ok) return;
+  // 释放文件占用：若播放器正打开该视频，提交去词前先关闭（WinError 5 最常见来源）
+  if (state.player && state.player.videoId === vid) closePlayer();
   try {
     const r = await api("POST", `/api/videos/${vid}/cut`, { hit_ids: hids, pad: 0.3 });
     state.activeCut = { videoId: vid, jobId: r.job_id };

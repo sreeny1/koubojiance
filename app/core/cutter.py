@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -314,6 +315,45 @@ def _terminate(proc: subprocess.Popen) -> None:
             proc.kill()
     except Exception:  # noqa: BLE001
         pass
+
+
+# ----------------------------------------------------------------------
+# 替换目标文件（清只读 + 重试，规避 WinError 5 占用/只读）
+# ----------------------------------------------------------------------
+def replace_over_target(tmp: str | Path, dst: str | Path, attempts: int = 8) -> None:
+    """把 tmp 原子替换为 dst（原名）。
+
+    Windows 上 MoveFileEx 替换目标时若目标被其它进程占用（播放器/缩略图/
+    杀毒/同步工具）或带只读属性，会抛 [WinError 5] 拒绝访问。此处：
+    1. 先清只读属性；2. 退避重试（占用多为瞬时）；3. 仍失败给出可操作提示。
+    """
+    import stat
+    import time
+
+    tmp, dst = Path(tmp), Path(dst)
+
+    def _clear_readonly(p: Path) -> None:
+        try:
+            if p.is_file() and (p.stat().st_mode & stat.S_IREAD):
+                os.chmod(p, stat.S_IWRITE)
+        except OSError:
+            pass
+
+    _clear_readonly(dst)
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            os.replace(tmp, dst)
+            return
+        except (PermissionError, OSError) as e:  # noqa: BLE001  WinError5=PermissionError
+            last = e
+            _clear_readonly(dst)  # 每轮再清一次（防又被置回）
+            time.sleep(0.3 * (i + 1))
+    raise RuntimeError(
+        f"替换原文件失败（可能被占用或只读）：{dst}\n"
+        f"请关闭正在使用该视频的程序（内置播放器/预览/杀毒/同步软件）后重试。"
+        f"\n原始错误：{last}"
+    )
 
 
 # ----------------------------------------------------------------------
