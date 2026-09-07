@@ -26,14 +26,28 @@ LOCAL_MODELS = MODELS_DIR / "local"
 MS_BASE = "https://modelscope.cn/models/Systran/faster-whisper-{name}/resolve/master"
 HF_BASE = "https://hf-mirror.com/Systran/faster-whisper-{name}/resolve/main"
 
-# faster-whisper 模型仓库的候选文件清单
+# faster-whisper 模型仓库的候选文件清单（下载时按"源上实际存在"挑选）
+# 关键：不同模型词表文件不同——large-v3 用 vocabulary.json，medium/small/base/tiny 用 vocabulary.txt！
 MODEL_FILES = [
-    "model.bin", "config.json", "preprocessor_config.json",
-    "tokenizer.json", "vocabulary.json",
+    "model.bin", "config.json", "tokenizer.json",
+    "vocabulary.json", "vocabulary.txt",
+    "preprocessor_config.json", "configuration.json",
 ]
-# 加载必需要的最小文件集（不同模型仓库文件不全相同，small/medium 可能缺少
-# preprocessor_config.json / vocabulary.json，缺失不影响 faster-whisper 加载）
-_REQUIRED_FILES = ["model.bin", "config.json", "tokenizer.json"]
+# 加载必需的核心文件（ctranslate2 加载模型必须）
+_CORE_FILES = ["model.bin", "config.json", "tokenizer.json"]
+# 词表文件候选（不同模型必有其一；缺失会导致 "Cannot load the vocabulary from the model directory"）
+_VOCAB_FILES = ["vocabulary.json", "vocabulary.txt"]
+# 各模型仓库实际存在的"模型本体"文件（用于界面/手动引导精确展示；.gitattributes/README.md 之外）
+_MODEL_FILES_EXPECTED = {
+    "large-v3": ["model.bin", "config.json", "tokenizer.json", "vocabulary.json",
+                 "preprocessor_config.json", "configuration.json"],
+    "large-v3-turbo": ["model.bin", "config.json", "tokenizer.json", "vocabulary.json",
+                       "preprocessor_config.json", "configuration.json"],  # large-v3 变体，同理
+    "medium": ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt", "configuration.json"],
+    "small": ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt", "configuration.json"],
+    "base": ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt", "configuration.json"],
+    "tiny": ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt", "configuration.json"],
+}
 # ModelScope 已官方镜像的模型尺寸（经 verify_model.py 逐文件核验过大模型）
 MS_AVAILABLE = {"large-v3", "large-v3-turbo", "medium", "small", "base", "tiny"}
 
@@ -45,11 +59,14 @@ def local_model_path(name: str) -> Path:
 def is_model_ready(name: str) -> bool:
     """本地模型是否可加载（引擎加载前检查）。
 
-    只校验 faster-whisper 加载必需的最小文件集。不同模型仓库文件数不同：
-    small/medium 可能没有 preprocessor_config.json / vocabulary.json，缺失属正常。
+    必须满足：3 个核心文件齐全 + 至少一个词表文件（vocabulary.json 或 vocabulary.txt）。
+    不同模型词表形式不同，若只核对核心 3 文件会误判"就绪"而在加载时报
+    "Cannot load the vocabulary from the model directory"。
     """
     d = local_model_path(name)
-    return all((d / f).is_file() for f in _REQUIRED_FILES)
+    if not all((d / f).is_file() for f in _CORE_FILES):
+        return False
+    return any((d / f).is_file() for f in _VOCAB_FILES)
 
 
 def ms_exists(name: str) -> bool:
@@ -155,10 +172,11 @@ def manual_download_guide(name: str) -> dict:
 
 def _initial_files(name: str) -> list[dict]:
     """构造模型文件清单（大小用估算值，存在标记按本地判断）。"""
+    files = _MODEL_FILES_EXPECTED.get(name, MODEL_FILES)
     return [
         {"name": f, "size": _estimate_size(name, f), "exists": (local_model_path(name) / f).is_file(),
          "status": "done" if (local_model_path(name) / f).is_file() else "pending"}
-        for f in MODEL_FILES
+        for f in files
     ]
 
 
@@ -236,7 +254,7 @@ def _resolve_source_files(base: str, name: str) -> list[str]:
         if f not in out and (local_model_path(name) / f).is_file():
             out.append(f)
     if not out:
-        out = list(_REQUIRED_FILES)  # 兜底：至少按必需文件
+        out = list(_CORE_FILES) + list(_VOCAB_FILES)  # 兜底：核心 + 词表
     return out
 
 
