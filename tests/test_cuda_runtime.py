@@ -60,6 +60,7 @@ if "--download" in sys.argv:
     assert ready, "就绪校验未通过"
     # 再抽查一个 DLL 的 SHA256 与 wheel 包内一致（完整性）
     from core.config import RUNTIME_DIR
+    # 运行库结构：data/runtime/nvidia/<pkg>/bin/*.dll（wheel 内 nvidia/ 前缀已剥离）
     dll = RUNTIME_DIR / "nvidia" / "cublas" / "bin" / "cublas64_12.dll"
     assert dll.is_file() and dll.stat().st_size > 10 * 1024 * 1024
     print("[8] 关键 DLL 抽查: %s（%.1f MB）" % (dll.name, dll.stat().st_size / 1048576))

@@ -18,6 +18,7 @@ import hashlib
 import html
 import logging
 import re
+import shutil
 import time
 import zipfile
 from pathlib import Path
@@ -46,9 +47,9 @@ CUDA_PKGS: list[dict] = [
         "wheel": "nvidia_cublas_cu12-12.9.2.10-py3-none-win_amd64.whl",
         "size": 553,
         "required": [
-            "nvidia/cublas/bin/cublas64_12.dll",
-            "nvidia/cublas/bin/cublasLt64_12.dll",
-            "nvidia/cublas/bin/nvblas64_12.dll",
+            "cublas/bin/cublas64_12.dll",
+            "cublas/bin/cublasLt64_12.dll",
+            "cublas/bin/nvblas64_12.dll",
         ],
     },
     {
@@ -57,12 +58,12 @@ CUDA_PKGS: list[dict] = [
         "wheel": "nvidia_cudnn_cu12-9.25.1.1-py3-none-win_amd64.whl",
         "size": 732,
         "required": [
-            "nvidia/cudnn/bin/cudnn64_9.dll",
-            "nvidia/cudnn/bin/cudnn_ops64_9.dll",
-            "nvidia/cudnn/bin/cudnn_cnn64_9.dll",
-            "nvidia/cudnn/bin/cudnn_adv64_9.dll",
-            "nvidia/cudnn/bin/cudnn_graph64_9.dll",
-            "nvidia/cudnn/bin/cudnn_engines_precompiled64_9.dll",
+            "cudnn/bin/cudnn64_9.dll",
+            "cudnn/bin/cudnn_ops64_9.dll",
+            "cudnn/bin/cudnn_cnn64_9.dll",
+            "cudnn/bin/cudnn_adv64_9.dll",
+            "cudnn/bin/cudnn_graph64_9.dll",
+            "cudnn/bin/cudnn_engines_precompiled64_9.dll",
         ],
     },
     {
@@ -71,8 +72,8 @@ CUDA_PKGS: list[dict] = [
         "wheel": "nvidia_cuda_nvrtc_cu12-12.9.86-py3-none-win_amd64.whl",
         "size": 76,
         "required": [
-            "nvidia/cuda_nvrtc/bin/nvrtc64_120_0.dll",
-            "nvidia/cuda_nvrtc/bin/nvrtc64_120_0.alt.dll",
+            "cuda_nvrtc/bin/nvrtc64_120_0.dll",
+            "cuda_nvrtc/bin/nvrtc64_120_0.alt.dll",
         ],
     },
 ]
@@ -113,7 +114,7 @@ def cuda_bin_dirs() -> list[str]:
     if not is_cuda_runtime_ready():
         return []
     dirs: list[str] = []
-    for d in sorted(NVIDIA_DIR.glob("nvidia/*/bin")):
+    for d in sorted(NVIDIA_DIR.glob("*/bin")):
         if d.is_dir() and any(d.glob("*.dll")):
             dirs.append(str(d))
     return dirs
@@ -211,15 +212,30 @@ def _mark_wheel(whl: Path, sha: str) -> None:
 
 
 def _install_wheel(whl: Path, nvidia_dir: Path) -> None:
-    """把 wheel（即 zip）安全解压到运行库目录。"""
+    """把 wheel（即 zip）安全解压到运行库目录。
+
+    wheel 内成员通常带 nvidia/ 前缀（如 nvidia/cublas/bin/...），手动写入时
+    剥离该前缀，使最终结构为 data/runtime/nvidia/<pkg>/bin/*.dll，
+    避免出现 nvidia/nvidia 双层目录；同时逐成员做路径安全校验。
+    """
     nvidia_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(str(whl)) as zf:
         for member in zf.infolist():
-            name = member.filename.replace("\\", "/")
-            if name.startswith(("/", "\\")) or ".." in name.split("/") or ":" in name:
-                raise RuntimeError(f"wheel 含不安全路径，已拒绝: {name}")
+            src_name = member.filename.replace("\\", "/")
+            # 路径安全校验（防 zip 炸弹路径穿越）
+            if src_name.startswith(("/", "\\")) or ".." in src_name.split("/") or ":" in src_name:
+                raise RuntimeError(f"wheel 含不安全路径，已拒绝: {src_name}")
+            target_name = src_name
+            if target_name.startswith("nvidia/"):
+                target_name = target_name[len("nvidia/"):]
+            target = nvidia_dir / target_name
+            if src_name.endswith("/") or target_name.endswith("/"):
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member, "r") as src, open(target, "wb") as out:
+                shutil.copyfileobj(src, out, 1024 * 1024)
         log.info("解压 wheel: %s（%d 个成员）→ %s", whl.name, len(zf.infolist()), nvidia_dir)
-        zf.extractall(str(nvidia_dir))
 
 
 def _pkg_installed(pkg: dict) -> bool:
