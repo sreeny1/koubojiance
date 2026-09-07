@@ -157,6 +157,8 @@ class TaskManager:
         self.db.execute(
             "UPDATE tasks SET status='running', error=NULL WHERE id=?", (task_id,)
         )
+        log.info("任务 #%s 开始处理: %s（视频 #%s, %s）",
+                 task_id, video["filename"], video["id"], video["path"])
 
         try:
             def on_progress(frac: float) -> None:
@@ -203,13 +205,15 @@ class TaskManager:
             self._progress[task_id] = 1.0
             self._finish(task_id, "done", None)
             log.info(
-                "视频完成：%s（%d 段字幕，%d 处命中）",
-                video["filename"], len(segments), hits,
+                "任务 #%s 完成: %s（%d 段字幕，%d 处命中，SRT=%s）",
+                task_id, video["filename"], len(segments), hits,
+                SUBTITLES_DIR / f"{video['id']}_{video['filename']}.srt",
             )
         except TranscriptionCanceled:
+            log.info("任务 #%s 被用户取消: %s", task_id, video["filename"])
             self._finish(task_id, "canceled", "用户取消")
         except Exception as e:  # noqa: BLE001
-            log.exception("任务 %s 失败", task_id)
+            log.exception("任务 #%s 失败: %s", task_id, video["filename"])
             self._finish(task_id, "error", str(e)[:500])
         finally:
             self._cancel_flags.pop(task_id, None)
@@ -254,12 +258,14 @@ class TaskManager:
                     "AND status IN ('queued','running') LIMIT 1", (vid,)
                 )
                 if pending:
+                    log.debug("视频已在任务队列中，跳过: %s", f)
                     continue
             else:
                 vid = self.db.execute(
                     "INSERT INTO videos(path,filename) VALUES(?,?)",
                     (str(f), f.name),
                 )
+                log.debug("新建视频记录 #%s: %s", vid, f)
             tid = self.db.execute(
                 "INSERT INTO tasks(video_id) VALUES(?)", (vid,)
             )
@@ -267,6 +273,8 @@ class TaskManager:
             added += 1
         for tid in new_task_ids:
             self._queue.put(tid)
+        log.info("提交路径完成: 输入 %s 个路径 → 展开 %d 个媒体文件（去重后）→ 新任务 %d 个",
+                 len(paths), len(uniq), added)
         return {"files": len(uniq), "tasks": added}
 
     def retry(self, task_id: int) -> bool:
@@ -281,6 +289,7 @@ class TaskManager:
             "WHERE id=?", (task_id,)
         )
         self._queue.put(task_id)
+        log.info("任务 #%s 已重试入队", task_id)
         return True
 
     def cancel(self, task_id: int) -> bool:
@@ -295,6 +304,7 @@ class TaskManager:
             flag.set()
         if task["status"] == "queued":
             self._finish(task_id, "canceled", "用户取消")
+        log.info("任务 #%s 已请求取消", task_id)
         return True
 
     def progress_map(self) -> dict[int, float]:

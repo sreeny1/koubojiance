@@ -1,8 +1,11 @@
 """Excel 报告导出。"""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
+
+log = logging.getLogger("exporter")
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -67,4 +70,5 @@ def export_hits(video_ids: list[int] | None = None) -> Path:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = EXPORTS_DIR / f"违禁词检测报告_{stamp}.xlsx"
     wb.save(out)
+    log.info("导出 Excel 报告: %s（%d 行命中）", out, len(rows))
     return out

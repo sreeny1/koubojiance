@@ -70,6 +70,8 @@ class CutManager:
             (video_id, json.dumps(hit_ids), float(pad)),
         )
         self._queue.put(job_id)
+        log.info("去词任务 #%s 已提交: 视频 #%s, %d 个命中, pad=%.2fs",
+                 job_id, video_id, len(hit_ids), pad)
         return job_id
 
     def _run(self, job_id: int) -> None:
@@ -125,6 +127,8 @@ class CutManager:
             "UPDATE cut_jobs SET status='running', error=NULL, progress=0 "
             "WHERE id=?", (job_id,)
         )
+        log.info("去词任务 #%s 开始处理: 视频 #%s %s，%d 个去除区间",
+                 job_id, job["video_id"], video["filename"], len(ranges))
 
         tmp = src.with_name(src.stem + ".cut_tmp.mp4")
         try:
@@ -146,15 +150,16 @@ class CutManager:
             self._finish(job_id, "done", None)
             self._requeue_transcribe(job["video_id"])
             log.info(
-                "去词完成：%s（去除 %d 个区间，备份 %s）",
-                video["filename"], len(ranges), backup.name,
+                "去词任务 #%s 完成：%s（去除 %d 个区间，备份 %s）",
+                job_id, video["filename"], len(ranges), backup,
             )
         except CutCanceled:
             tmp.unlink(missing_ok=True)
+            log.info("去词任务 #%s 被用户取消: %s", job_id, video["filename"])
             self._finish(job_id, "canceled", "用户取消")
         except Exception as e:  # noqa: BLE001
             tmp.unlink(missing_ok=True)
-            log.exception("去词任务 %s 失败", job_id)
+            log.exception("去词任务 #%s 失败: %s", job_id, video["filename"])
             self._finish(job_id, "error", str(e)[:500])
         finally:
             self._cancel.pop(job_id, None)

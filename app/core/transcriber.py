@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -146,11 +147,17 @@ class WhisperEngine:
 
         # model_name 是已解析结果：本地目录路径 / 在线模型名
         is_local = Path(model_name).is_dir()
+        t0 = time.monotonic()
         try:
-            return WhisperModel(
+            log.info("加载 WhisperModel: %s（%s, device=%s, compute_type=%s）",
+                     model_name, "本地目录" if is_local else "在线拉取",
+                     device, compute)
+            m = WhisperModel(
                 model_name, device=device, compute_type=compute,
                 download_root=str(MODELS_DIR),
             )
+            log.info("WhisperModel 加载成功，耗时 %.1fs", time.monotonic() - t0)
+            return m
         except Exception as e:  # noqa: BLE001
             if not is_local and self._switch_to_mirror():
                 log.warning("官方源下载失败，已切换 hf-mirror 镜像重试: %s", e)
@@ -164,6 +171,7 @@ class WhisperEngine:
         """把 huggingface_hub 端点切换到国内镜像（并绕过系统代理直连）。"""
         if os.environ.get("HF_ENDPOINT") == "https://hf-mirror.com":
             return False
+        log.info("切换 HF 下载端点到镜像 hf-mirror.com（并绕过系统代理直连）")
         os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
         self._bypass_system_proxy()
         try:
@@ -251,7 +259,10 @@ class WhisperEngine:
             device = self._settings.get("device", "auto")
             compute = self._settings.get("compute_type", "int8_float16")
             if device == "auto":
-                device = "cuda" if self._cuda_available() else "cpu"
+                cuda_ok = self._cuda_available()
+                log.info("CUDA 可用性检测: %s → 初始设备 %s", cuda_ok,
+                         "cuda" if cuda_ok else "cpu")
+                device = "cuda" if cuda_ok else "cpu"
 
             # 降级链：请求配置 → 更保守的 GPU 配置 → CPU
             chain: list[tuple[str, str]] = []
@@ -261,19 +272,24 @@ class WhisperEngine:
                     chain.append(("cuda", "int8_float16"))
                 chain.append(("cuda", "int8"))
             chain.append(("cpu", "int8"))
+            log.info("模型加载降级链: %s", " → ".join(f"{d}/{c}" for d, c in chain))
 
             last_err: Exception | None = None
             for dev, comp in chain:
                 try:
-                    log.info("加载模型 %s (%s/%s)", name, dev, comp)
+                    log.info("尝试加载模型 %s (%s/%s)", name, dev, comp)
                     self._model = self._load_model_once(model_path, dev, comp)
                     self.effective = {
                         "model": name, "device": dev, "compute_type": comp,
                     }
+                    log.info("模型加载成功: %s，生效配置 device=%s compute_type=%s",
+                             name, dev, comp)
                     return self._model
                 except Exception as e:  # noqa: BLE001
                     last_err = e
-                    log.warning("模型加载失败 %s/%s: %s，尝试降级", dev, comp, e)
+                    log.warning("模型加载失败 %s/%s: %s，尝试下一降级组合",
+                                dev, comp, e)
+                    log.debug("模型加载失败详情", exc_info=True)
             raise RuntimeError(f"模型加载失败（已尝试全部降级组合）: {last_err}")
 
     def reload(self, settings: dict) -> None:
@@ -306,11 +322,15 @@ class WhisperEngine:
             log.info("媒体无音轨，跳过转写：%s", src)
             return []
 
+        log.info("等待转写互斥锁（串行化原生推理）: %s", src)
+        t_lock = time.monotonic()
         with self._transcribe_lock:
+            log.info("已获取转写锁（等待 %.2fs）: %s", time.monotonic() - t_lock, src)
             model = self.get_model()
-            log.info("开始转写：%s（时长 %sms，设备 %s/%s）",
+            log.info("开始转写：%s（时长 %sms，设备 %s/%s，language=%s，beam_size=5，vad=True）",
                      src, duration or 0, self.effective.get("device"),
-                     self.effective.get("compute_type"))
+                     self.effective.get("compute_type"),
+                     self._settings.get("language", "zh"))
 
             lang = self._settings.get("language", "zh")
             kwargs: dict = dict(
@@ -321,33 +341,43 @@ class WhisperEngine:
                 condition_on_previous_text=False,  # 防止坏音频引起重复循环
             )
 
+            t0 = time.monotonic()
             try:
                 segments_iter, info = model.transcribe(src, **kwargs)
             except Exception as e:  # noqa: BLE001
                 # 个别格式 PyAV 解不开时，用 ffmpeg 抽轨后重试一次
                 log.warning("直接转写失败(%s)，尝试 ffmpeg 抽音轨: %s", src, e)
+                log.debug("直接转写异常详情", exc_info=True)
                 from .config import DATA_DIR
 
                 wav = DATA_DIR / "media" / f"_tmp_{Path(src).stem[:50]}.wav"
                 if not extract_audio_wav(src, wav):
                     raise RuntimeError(f"音轨解析失败: {e}")
                 try:
+                    log.info("使用 ffmpeg 抽取音轨后重试: %s", src)
                     segments_iter, info = model.transcribe(str(wav), **kwargs)
                 finally:
                     wav.unlink(missing_ok=True)
 
             if duration is None:
                 duration = int((info.duration or 0) * 1000)
+            log.debug("whisper 元信息: 音频时长 %.1fs，检测语言 %s（概率 %.2f）",
+                      info.duration, info.language, info.language_probability)
 
             result: list[dict] = []
             for seg in segments_iter:  # 生成器：边转写边产出
                 if cancel_check and cancel_check():
+                    log.info("转写被用户取消: %s", src)
                     raise TranscriptionCanceled()
                 result.append({"start": seg.start, "end": seg.end, "text": seg.text.strip()})
                 if progress and duration > 0:
                     progress(min(0.99, seg.end * 1000 / duration))
             if progress:
                 progress(1.0)
+            log.info("转写完成: %s → %d 段字幕（%s 音频，耗时 %.1fs，平均 %.2f 倍速）",
+                     src, len(result), Path(src).name,
+                     time.monotonic() - t0,
+                     (time.monotonic() - t0) / max(duration / 1000, 0.001))
             return split_oversized_segments(result)
 
 
@@ -377,6 +407,8 @@ def split_oversized_segments(segments: list[dict]) -> list[dict]:
         if len(subs) <= 1:
             out.append(seg)
             continue
+        log.debug("切分超长字幕段: %.1fs/%d字 → %d 句",
+                  dur, len(seg["text"]), len(subs))
         # 按各子句字符数占比分配时长
         total_chars = sum(len(s) for s in subs)
         t = seg["start"]

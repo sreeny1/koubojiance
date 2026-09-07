@@ -5,8 +5,11 @@ faster-whisper 内置 PyAV 可直接读视频容器中的音轨，绝大多数�
 """
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
+
+log = logging.getLogger("media")
 
 _FFMPEG: str | None = None
 
@@ -24,11 +27,13 @@ def get_ffmpeg() -> str:
 
     if os.environ.get("FFMPEG_PATH") and Path(os.environ["FFMPEG_PATH"]).exists():
         _FFMPEG = os.environ["FFMPEG_PATH"]
+        log.info("使用环境变量指定的 ffmpeg: %s", _FFMPEG)
         return _FFMPEG
     try:
         import imageio_ffmpeg
 
         _FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+        log.info("使用 imageio-ffmpeg 自带 ffmpeg: %s", _FFMPEG)
         return _FFMPEG
     except Exception:  # noqa: BLE001
         # 最后退回系统 PATH 中的 ffmpeg（若存在）
@@ -37,6 +42,7 @@ def get_ffmpeg() -> str:
         sys_ff = shutil.which("ffmpeg")
         if sys_ff:
             _FFMPEG = sys_ff
+            log.info("回退到系统 PATH 中的 ffmpeg: %s", _FFMPEG)
             return _FFMPEG
     raise RuntimeError(
         "未找到 ffmpeg：请确认 .venv 中已安装 imageio-ffmpeg，"
@@ -78,13 +84,19 @@ def extract_audio_wav(src: str | Path, dst: str | Path) -> bool:
         "-vn", "-ac", "1", "-ar", "16000",
         "-acodec", "pcm_s16le", str(dst),
     ]
+    log.info("ffmpeg 抽取音轨: %s → %s", src, dst)
     try:
         r = subprocess.run(
             cmd, capture_output=True, timeout=1800,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        return r.returncode == 0 and Path(dst).exists()
-    except Exception:  # noqa: BLE001
+        ok = r.returncode == 0 and Path(dst).exists()
+        log.info("抽取音轨结果: %s（退出码 %s，stderr: %s）",
+                 "成功" if ok else "失败", r.returncode,
+                 (r.stderr or b"").decode("utf-8", "ignore")[-300:] if not ok else "")
+        return ok
+    except Exception as e:  # noqa: BLE001
+        log.warning("抽取音轨异常: %s", e)
         return False
 
 

@@ -177,6 +177,21 @@
       <h3>当前引擎状态</h3>
       <div id="engineInfo" class="engine-info">尚未加载模型（首次转写时自动加载）</div>
     </div>
+    <div class="panel">
+      <h3>日志与排障</h3>
+      <div class="form-grid">
+        <label class="wide"><input type="checkbox" id="setLogDebug"> 详细日志模式（DEBUG，记录每文件/每段/ffmpeg 命令/HTTP 请求等更多调试信息，排查问题时建议开启）</label>
+        <label class="wide">日志目录（软件根目录 logs 文件夹）
+          <code id="logDirPath"></code>
+        </label>
+      </div>
+      <div class="add-row">
+        <button class="btn btn-sm" id="btnViewLogs">查看最近日志</button>
+        <button class="btn btn-sm btn-primary" id="btnOpenLogDir">打开日志目录</button>
+      </div>
+      <pre id="logView" class="logview" hidden></pre>
+      <p class="muted small">服务端 / 前端 / 启动器所有日志统一写入软件根目录 <b>logs</b> 文件夹（logs\app.log、logs\launcher.log），便于排查与定位问题。前端出现未捕获错误时也会自动上报到日志。</p>
+    </div>
   </section>
 </main>
 

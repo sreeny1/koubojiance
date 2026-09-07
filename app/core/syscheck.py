@@ -10,8 +10,11 @@
 """
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
+
+log = logging.getLogger("syscheck")
 
 MIN_RAM_GB = 8
 MIN_FREE_DISK_GB = 8
@@ -97,8 +100,10 @@ def detect_gpu() -> dict:
     except Exception:  # noqa: BLE001
         cuda = False
     info["cuda"] = cuda
+    log.debug("ctranslate2 CUDA 设备数 > 0: %s", cuda)
 
     names = _win_gpu_names()
+    log.debug("Windows 显卡枚举: %s", names or ["（无）"])
     # 取第一个非虚拟显示适配器作为主显卡名
     for n in names:
         low = n.lower()
@@ -121,6 +126,8 @@ def detect_gpu() -> dict:
         else:
             info["vendor"] = "none" if not names else "unknown"
         info["recommended_device"] = "cpu"
+    log.debug("显卡判定: vendor=%s name=%s cuda=%s → 推荐设备 %s",
+               info["vendor"], info["name"], info["cuda"], info["recommended_device"])
     return info
 
 
@@ -136,6 +143,8 @@ def check_requirements(data_dir: Path | None = None) -> dict:
     avx2 = _cpu_avx2()
     if not avx2:
         problems.append("CPU 不支持 AVX2 指令集，本地语音转写引擎无法运行")
+    log.debug("系统门槛检查: 内存=%sGB 磁盘=%sGB AVX2=%s → %s",
+               ram, free, avx2, "通过" if not problems else f"不通过: {problems}")
     return {
         "ok": not problems,
         "problems": problems,

@@ -50,6 +50,7 @@ def probe_media(path: str | Path) -> dict:
         "channels": None,
         "audio_bitrate": None,
     }
+    log.debug("探测媒体参数: %s", path)
     with av.open(str(path)) as c:
         if c.duration is not None:
             info["duration_sec"] = c.duration / 1_000_000  # av 时长单位：微秒
@@ -80,6 +81,7 @@ def probe_media(path: str | Path) -> dict:
                 info["sample_rate"] = getattr(ctx, "sample_rate", None)
                 info["channels"] = getattr(ctx, "channels", None)
                 info["audio_bitrate"] = getattr(ctx, "bit_rate", None)
+    log.debug("媒体参数: %s", info)
     return info
 
 
@@ -197,10 +199,13 @@ def cut_remove_ranges(
     keep = _keep_intervals(ranges, info.get("duration_sec"))
     if not keep:
         raise ValueError("去除区间覆盖了整段视频，没有可保留的内容")
+    log.info("去词切割参数: 源时长=%.2fs，去除区间=%s，保留区间=%s",
+             total, ranges, keep)
 
     ffmpeg = get_ffmpeg()
     cmd = [ffmpeg, "-y", "-i", str(src)]
     fc = _build_filtergraph(keep, bool(info["has_audio"]))
+    log.debug("filter_complex: %s", fc)
     maps: list[str] = ["-map", "[vout]"]
     if info["has_audio"]:
         maps += ["-map", "[aout]"]
@@ -232,7 +237,10 @@ def cut_remove_ranges(
     cmd += ["-movflags", "+faststart"]
     cmd += ["-progress", "pipe:1", "-nostats", "-loglevel", "error", str(dst)]
 
-    log.info("ffmpeg 切割：%d 个去除区间（源时长 %.1fs）", len(ranges), total)
+    log.info("ffmpeg 切割：%d 个去除区间（源时长 %.1fs）→ %s", len(ranges), total, dst)
+    # 完整命令行记录：参数一致性出问题时可直接复现
+    log.info("ffmpeg 命令: %s", subprocess.list2cmdline(cmd))
+    t0 = time.monotonic()
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -258,10 +266,12 @@ def cut_remove_ranges(
                     frac = min(1.0, max(0.0, t / total))
                     if frac - last_frac >= 0.01 or frac >= 1.0:
                         last_frac = frac
+                        log.debug("ffmpeg 进度 %.0f%%（out_time=%s）", frac * 100, t)
                         progress(frac)
         # 读取剩余 stderr（避免管道写满阻塞）
         err = proc.stderr.read() if proc.stderr else ""
         code = proc.wait()
+        log.info("ffmpeg 切割结束: 退出码=%s，耗时 %.1fs", code, time.monotonic() - t0)
     except CutCanceled:
         _terminate(proc)
         dst.unlink(missing_ok=True)
@@ -273,13 +283,18 @@ def cut_remove_ranges(
 
     if code != 0:
         dst.unlink(missing_ok=True)
+        log.error("ffmpeg 切割失败（退出码 %s），stderr 尾部: %s", code, err[-800:])
         raise RuntimeError(f"ffmpeg 切割失败（退出码 {code}）：{err[-800:]}")
 
     if not dst.is_file() or dst.stat().st_size == 0:
         raise RuntimeError("ffmpeg 切割产物为空（可能所有区间均被去除）")
 
+    out_size = dst.stat().st_size
     if progress:
         progress(1.0)
+    log.info("ffmpeg 切割产物: %s（%.1f MB，原 %.1f MB）",
+             dst, out_size / 1048576,
+             src.stat().st_size / 1048576 if src.is_file() else 0)
     return info
 
 
@@ -318,4 +333,6 @@ def backup_original(path: str | Path) -> Path:
     import shutil
 
     shutil.copy2(src, backup)
+    log.info("已备份原文件: %s → %s（%.1f MB）",
+             src, backup, backup.stat().st_size / 1048576)
     return backup

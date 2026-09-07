@@ -1,6 +1,37 @@
 /* 口播违禁词检测 - 前端逻辑 */
 "use strict";
 
+/* ========================= 前端日志上报（汇入 logs/app.log） ========================= */
+function clientLog(level, message, extra) {
+  try {
+    const payload = JSON.stringify({
+      level: level || "info",
+      message: String(message || "").slice(0, 2000),
+      extra: String(extra || "").slice(0, 4000),
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon("/api/log", new Blob([payload], { type: "application/json" }));
+    } else {
+      fetch("/api/log", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: payload, keepalive: true,
+      }).catch(() => {});
+    }
+  } catch (_) {}
+}
+// 全局未捕获错误 / Promise 拒绝：自动上报到服务端日志，便于定位前端问题
+window.addEventListener("error", (e) => {
+  clientLog("error",
+    "[window.onerror] " + e.message + " @ " + (e.filename || "?") + ":" + (e.lineno || 0) + ":" + (e.colno || 0),
+    (e.error && e.error.stack) || "");
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  clientLog("error",
+    "[unhandledrejection] " + ((r && (r.stack || r.message)) || String(r)),
+    (r && r.stack) || "");
+});
+
 /* ========================= 工具函数 ========================= */
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -42,10 +73,17 @@ async function api(method, url, body) {
     opt.headers["Content-Type"] = "application/json";
     opt.body = JSON.stringify(body);
   }
-  const r = await fetch(url, opt);
+  let r;
+  try {
+    r = await fetch(url, opt);
+  } catch (e) {
+    clientLog("error", `api ${method} ${url} 网络异常: ${e.message}`, e.stack || "");
+    throw e;
+  }
   if (!r.ok) {
     let msg = `请求失败 (${r.status})`;
     try { const j = await r.json(); if (j.detail) msg = j.detail; } catch (_) {}
+    clientLog("warn", `api ${method} ${url} → ${r.status}: ${msg}`);
     throw new Error(msg);
   }
   return r.json();
@@ -899,6 +937,8 @@ async function loadSettings() {
   $("#setWorkers").value = s.max_workers;
   $("#setTheme").value = s.theme || "system";
   $("#setHfEndpoint").value = s.hf_endpoint || "";
+  $("#setLogDebug").checked = s.log_level === "debug";
+  $("#logDirPath").textContent = s.log_dir || "";
   if (s.theme) applyTheme(s.theme);  // 以服务端设置为准（首次打开无 localStorage 时也正确）
 
   // 标注本地已下载的模型，避免用户以为切换模型都要重新下载
@@ -921,11 +961,29 @@ $("#btnSaveSettings").addEventListener("click", async () => {
     max_workers: Number($("#setWorkers").value) || 1,
     theme: $("#setTheme").value,
     hf_endpoint: $("#setHfEndpoint").value.trim(),
+    log_level: $("#setLogDebug").checked ? "debug" : "info",
   };
   try {
     await api("POST", "/api/settings", payload);
     toast("设置已保存（转写相关设置从下次任务生效）");
     refreshStatus();
+  } catch (e) { toast(e.message, true); }
+});
+
+$("#btnViewLogs").addEventListener("click", async () => {
+  const view = $("#logView");
+  try {
+    const d = await api("GET", "/api/logs/tail?lines=400");
+    view.textContent = (d.note ? d.note + "\n\n" : "") + d.lines.join("\n");
+    view.hidden = false;
+    view.scrollTop = view.scrollHeight;
+    if (!d.lines.length) toast("暂无日志内容");
+  } catch (e) { toast(e.message, true); }
+});
+$("#btnOpenLogDir").addEventListener("click", async () => {
+  try {
+    const d = await api("POST", "/api/logs/open");
+    toast("已打开日志目录：" + (d.path || ""));
   } catch (e) { toast(e.message, true); }
 });
 
@@ -1050,10 +1108,12 @@ $("#welcomeModal").addEventListener("click", (e) => {
 
 /* ========================= 启动 ========================= */
 (async function init() {
+  clientLog("info", "前端页面初始化开始");
   initTheme();
   initTooltip();
   await refreshAll(true);
   schedulePoll();
   scheduleTaskPoll();
   maybeShowWelcome();
+  clientLog("info", "前端页面初始化完成");
 })();

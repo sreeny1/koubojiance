@@ -15,10 +15,47 @@ using Microsoft.Web.WebView2.WinForms;
 
 namespace LanJinCiLauncher
 {
+    /// <summary>启动器日志：写入软件根目录 logs\launcher.log（与 Python 服务端日志同目录，便于排查）。</summary>
+    static class AppLog
+    {
+        private static readonly object _lock = new object();
+        private static string _path = null;
+
+        public static void Init()
+        {
+            try
+            {
+                string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
+                Directory.CreateDirectory(dir);
+                _path = Path.Combine(dir, "launcher.log");
+            }
+            catch (Exception) { _path = null; }
+        }
+
+        public static void Info(string msg) { Write("INFO", msg); }
+        public static void Warn(string msg) { Write("WARN", msg); }
+        public static void Error(string msg) { Write("ERROR", msg); }
+
+        private static void Write(string level, string msg)
+        {
+            if (string.IsNullOrEmpty(_path)) return;
+            try
+            {
+                lock (_lock)
+                {
+                    File.AppendAllText(_path,
+                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + " [" + level + "] launcher: " +
+                        msg + Environment.NewLine, Encoding.UTF8);
+                }
+            }
+            catch (Exception) { }
+        }
+    }
+
     static class Program
     {
         // 版本号：保持与 app/core/config.py 的 APP_VERSION 一致（每次发布同步更新）
-        private const string Ver = "1.2.0";
+        private const string Ver = "1.3.0";
         private const string AppTitle = "口播违禁词检测";
         private const string MutexName = "CS_LJJC_LAUNCHER_SINGLETON";
         private const int PortStart = 8765;
@@ -48,11 +85,24 @@ namespace LanJinCiLauncher
                 return;
             }
 
+            AppLog.Init();
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+                AppLog.Error("AppDomain 未处理异常: " + (e.ExceptionObject as Exception));
+            Application.ThreadException += (s, e) =>
+                AppLog.Error("UI 线程异常: " + e.Exception);
+            AppLog.Info("启动器启动 v" + Ver + " | PID=" + Process.GetCurrentProcess().Id +
+                        " | OS=" + Environment.OSVersion + " | .NET=" + Environment.Version +
+                        " | exeDir=" + AppDomain.CurrentDomain.BaseDirectory);
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
             // 最低配置门槛：内存 / 磁盘 / AVX2 任一不满足则友好提示并退出
-            if (!CheckSystemRequirements()) return;
+            if (!CheckSystemRequirements())
+            {
+                AppLog.Warn("最低配置检查未通过，启动器退出");
+                return;
+            }
 
             string exeDir = AppDomain.CurrentDomain.BaseDirectory;
             string python = null;
@@ -115,6 +165,7 @@ namespace LanJinCiLauncher
             // 启动前清理本项目残留的服务进程（上次异常退出/重复启动可能残留旧实例，
             // 若不清理会与新服务抢端口，造成端口漂移与"启动慢/界面卡启动中"）。
             KillStaleServers(mainPy);
+            AppLog.Info("启动服务: python=" + python + " | main.py=" + mainPy + " | workdir=" + exeDir);
             try
             {
                 var psi = new ProcessStartInfo
@@ -133,12 +184,14 @@ namespace LanJinCiLauncher
                 _proc = Process.Start(psi);
                 _running = true;
                 _notified = false;
+                AppLog.Info("服务进程已启动，PID=" + _proc.Id);
                 if (_icon != null)
                     _icon.Text = AppTitle + " v" + Ver + " - 服务运行中";
             }
             catch (Exception ex)
             {
                 _running = false;
+                AppLog.Error("启动服务失败: " + ex);
                 MessageBox.Show("启动服务失败：" + ex.Message,
                     AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -174,6 +227,7 @@ namespace LanJinCiLauncher
                         if (cl.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
                         {
                             try { p.Kill(); } catch (Exception) { }
+                            AppLog.Warn("已清理残留服务进程 PID=" + p.Id);
                         }
                     }
                     catch (Exception) { /* 忽略无权限/已退出进程 */ }
@@ -188,6 +242,7 @@ namespace LanJinCiLauncher
             if (_proc.HasExited)
             {
                 _running = false;
+                AppLog.Warn("服务进程已退出（PID=" + _proc.Id + "，退出码 " + _proc.ExitCode + "）");
                 if (!_notified)
                 {
                     _notified = true;
@@ -201,6 +256,7 @@ namespace LanJinCiLauncher
         private static void StopServer()
         {
             _running = false;
+            AppLog.Info("停止服务（PID=" + (_proc != null ? _proc.Id.ToString() : "?") + "）");
             if (_proc != null && !_proc.HasExited)
             {
                 // 1) 通知服务优雅退出（停 worker、关数据库、进程自行结束）
@@ -219,6 +275,7 @@ namespace LanJinCiLauncher
                 if (!_proc.WaitForExit(2000))
                 {
                     // 3) 兜底：进程树强杀，确保 ffmpeg 等子进程零残留
+                    AppLog.Warn("服务未在 2s 内优雅退出，执行进程树强杀（taskkill /T /F）");
                     try
                     {
                         var psi = new ProcessStartInfo(
@@ -593,7 +650,7 @@ namespace LanJinCiLauncher
 
         // 类型名冲突规避：从 Program 暴露的常量更清晰
         private static string Program_AppTitle() { return "口播违禁词检测"; }
-        private static string Program_Ver() { return "1.2.0"; }
+        private static string Program_Ver() { return "1.3.0"; }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
@@ -620,11 +677,13 @@ namespace LanJinCiLauncher
             {
                 await _web.EnsureCoreWebView2Async();
                 _hasCore = true;
+                AppLog.Info("WebView2 核心初始化成功");
                 BindCoreHandlers();
                 TryNavigate();
             }
             catch (Exception ex)
             {
+                AppLog.Error("WebView2 初始化失败: " + ex);
                 _loading.Text = "WebView2 初始化失败：" + ex.Message;
                 _loading.ForeColor = Color.Firebrick;
             }
@@ -680,7 +739,8 @@ namespace LanJinCiLauncher
                 if (_lastPort != port || _web.Source == null)
                 {
                     _lastPort = port;
-                    try { _web.CoreWebView2.Navigate(url); } catch (Exception) { }
+                    AppLog.Info("导航到服务地址: " + url);
+                    try { _web.CoreWebView2.Navigate(url); } catch (Exception ex) { AppLog.Error("导航失败: " + ex); }
                 }
                 _web.Visible = true;
                 _loading.SendToBack();
@@ -899,10 +959,12 @@ namespace LanJinCiLauncher
             string err = Program.PostScanPaths(media);
             if (err.Length == 0)
             {
+                AppLog.Info("原生拖放提交成功: " + media.Count + " 个路径（含 " + folderCount + " 个文件夹）");
                 NotifyScanSubmitted(media.Count);
             }
             else
             {
+                AppLog.Warn("原生拖放提交失败: " + err);
                 MessageBox.Show(err, Program_AppTitle(),
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }

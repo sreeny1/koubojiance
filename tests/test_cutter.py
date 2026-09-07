@@ -9,6 +9,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "app"))
 
 from core.cutter import cut_remove_ranges, merge_ranges, hits_to_remove_ranges  # noqa: E402

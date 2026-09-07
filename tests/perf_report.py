@@ -103,8 +103,8 @@ def main() -> int:
         print(f"    {d:<12} {size / 1048576:8.1f} MB{flag}")
     print(f"    {'合计':<12} {total / 1048576:8.1f} MB")
 
-    print("\n    app.log 与导出文件：")
-    for p in sorted(DATA.glob("*.log*")) + sorted((DATA / "exports").glob("*"))[-5:]:
+    print("\n    logs/app.log 与导出文件：")
+    for p in sorted((DATA.parent / "logs").glob("*.log*")) + sorted((DATA / "exports").glob("*"))[-5:]:
         mb = p.stat().st_size / 1048576
         print(f"    {p.name:<50} {mb:6.2f} MB")
 
@@ -132,7 +132,7 @@ def main() -> int:
     print("  · 空闲时 python 物理内存 > 模型体积 + 300MB → 检查泄漏")
     print("  · 无任务时 /api/tasks 每 30s 轮询（前端已节流）→ 正常")
     print("  · data 体积：models 为大头且必要；media/subtitles 可手动清理")
-    print("  · app.log > 5MB 会自动轮转（保留 3 份）→ 正常")
+    print("  · logs/app.log > 20MB 会自动轮转（保留 10 份）→ 正常")
     return 0
 
 

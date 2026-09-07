@@ -11,9 +11,12 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from typing import Any
+
+log = logging.getLogger("detector")
 
 from pypinyin import Style, lazy_pinyin
 from zhconv import convert as zh_convert
@@ -95,6 +98,7 @@ class Detector:
                 "_norm": norm,
                 "_tokens": tokens,
             })
+        log.info("词库已重载: 启用词 %d 个", len(self.words))
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -218,6 +222,7 @@ class Detector:
                     "matched_text,start_ms,end_ms,sentence) "
                     "VALUES(?,?,?,?,?,?,?,?)", rows,
                 )
+        log.info("视频 %s 检测: %d 段字幕 → %d 处命中", video_id, len(segments), len(rows))
         return len(rows)
 
     def scan_all(self) -> dict[str, int]:
@@ -228,4 +233,5 @@ class Detector:
         total = 0
         for v in videos:
             total += self.scan_video(v["v"])
+        log.info("全库重新检测完成: %d 个视频 → %d 处命中", len(videos), total)
         return {"videos": len(videos), "hits": total}

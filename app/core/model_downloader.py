@@ -11,6 +11,7 @@ ModelScope 不支持该模型时回退 HuggingFace hf-mirror 直连。
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
 import urllib.request
@@ -20,6 +21,8 @@ from typing import Callable
 import httpx
 
 from .config import MODELS_DIR
+
+log = logging.getLogger("model_download")
 
 LOCAL_MODELS = MODELS_DIR / "local"
 
@@ -75,18 +78,21 @@ def ms_exists(name: str) -> bool:
         return False
     url = f"https://modelscope.cn/api/v1/models/Systran/faster-whisper-{name}"
     last_err: Exception | None = None
-    for _ in range(3):
+    for attempt in range(1, 4):
         try:
             r = httpx.get(url, timeout=20, trust_env=False)
+            log.debug("ModelScope 探测 %s（第 %d 次）→ %s", name, attempt, r.status_code)
             if r.status_code == 200:
                 return True
             if r.status_code == 404:
+                log.info("ModelScope 无模型 %s（404），改用 hf-mirror", name)
                 return False
             # 其它状态（如 429/5xx）继续重试
         except Exception as e:  # noqa: BLE001
             last_err = e
+            log.warning("ModelScope 探测第 %d 次失败: %s", attempt, e)
         time.sleep(2)
-    print(f"  [警告] ModelScope 探测失败（{last_err}），回退 hf-mirror 慢速源", flush=True)
+    log.warning("ModelScope 探测失败（%s），回退 hf-mirror 慢速源", last_err)
     return False
 
 
@@ -99,9 +105,12 @@ def download_file(url: str, dst: Path, retries: int = 10,
     """
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(dst.suffix + ".part")
+    t0 = time.monotonic()
     for attempt in range(1, retries + 1):
         pos = tmp.stat().st_size if tmp.exists() else 0
         headers = {"Range": f"bytes={pos}-"} if pos else {}
+        log.debug("下载文件 %s（第 %d 次尝试，断点 %s）", dst.name, attempt,
+                  f"{pos / 1048576:.1f}MB" if pos else "0")
         try:
             with httpx.stream("GET", url, headers=headers, timeout=30,
                               trust_env=False, follow_redirects=True) as r:
@@ -125,11 +134,15 @@ def download_file(url: str, dst: Path, retries: int = 10,
         except _DownloadCanceled:
             raise
         except Exception as e:  # noqa: BLE001
+            log.warning("下载 %s 第 %d 次失败: %s（将重试）", dst.name, attempt, e)
             if attempt == retries:
                 raise
             time.sleep(attempt * 3)  # 指数退避重试
     if tmp.exists():
+        size = tmp.stat().st_size
         os.replace(tmp, dst)
+        log.info("文件下载完成: %s（%.2f MB，耗时 %.1fs）",
+                 dst.name, size / 1048576, time.monotonic() - t0)
 
 
 class _DownloadCanceled(Exception):
@@ -247,6 +260,8 @@ def _resolve_source_files(base: str, name: str) -> list[str]:
                     ok = r.status_code in (200, 206)
             except Exception:  # noqa: BLE001
                 ok = False
+        log.debug("源文件探测 %s → %s=%s", f, "存在" if ok else "404",
+                  url[:110])
         if ok:
             out.append(f)
     # 本机已存在的文件也纳入（避免源临时探测不到但本地已有）
@@ -275,6 +290,9 @@ def _download_from(base: str, name: str, file_list: list[str], target_dir: Path,
             "status": "done" if exists else "pending",
         })
     n = len(file_list)
+    log.info("使用源 [%s] 下载模型 %s：%d 个文件（%s）", src_label, name, n,
+             ", ".join(f"{f['name']}({'已存在' if f['exists'] else f['size']})"
+                       for f in [{"name": fn, "size": sizes.get(fn) or _estimate_size(name, fn), "exists": (target_dir / fn).is_file()} for fn in file_list]))
     state = {
         "name": name, "source": src_label, "overall": 0.0, "frac": 0.0,
         "current_file": None, "file_index": 0, "file_count": n,
@@ -294,6 +312,8 @@ def _download_from(base: str, name: str, file_list: list[str], target_dir: Path,
         size = state["files"][i]["size"] or 0
         state["total"] = size
         url = f"{base}/{fname}"
+        log.info("开始下载文件 %s/%s（%.2f MB）→ %s",
+                 name, fname, (size or 0) / 1048576, target_dir / fname)
 
         def on_f(frac: float, _state=state, _i=i) -> None:
             _set_file(_state, frac, _i, name, progress, state_cb)
@@ -322,19 +342,25 @@ def download_model(name: str,
         return
 
     sources = _pick_sources(name)
+    log.info("模型 %s 本地未就绪，开始下载。源优先级: %s",
+             name, " → ".join(label for label, _ in sources))
     last_err: Exception | None = None
     for label, base in sources:
         try:
-            print(f"  使用下载源：{label}", flush=True)
+            log.info("使用下载源: %s", label)
             file_list = _resolve_source_files(base, name)
             _download_from(base, name, file_list, target_dir, progress, cancel_check, label, state_cb)
             if is_model_ready(name):
+                log.info("模型 %s 下载完成（源: %s），就绪校验通过", name, label)
                 return
+            log.warning("源 %s 下载结束但就绪校验未通过，尝试下一源", label)
         except _DownloadCanceled:
+            log.info("模型 %s 下载被用户取消", name)
             raise
         except Exception as e:  # noqa: BLE001
             last_err = e
-            print(f"  [警告] 源 {label} 下载失败（{e}），尝试下一源", flush=True)
+            log.warning("源 %s 下载失败（%s），尝试下一源", label, e)
+    log.error("模型下载失败（已尝试全部源）: %s", last_err)
     raise RuntimeError(
         f"模型下载失败（已尝试全部源）：{last_err}\n"
         f"请检查网络后重试，或按界面提示手动下载后放入 {target_dir}"

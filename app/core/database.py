@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .config import DB_PATH
+
+log = logging.getLogger("database")
 
 SCHEMA_VERSION = 1
 
@@ -132,6 +135,7 @@ class Database:
         # WAL 模式：读写不互斥，浏览器轮询期间后台写库不阻塞
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        log.info("数据库已打开: %s（schema_version=%s）", path, SCHEMA_VERSION)
         self._init_schema()
 
     # ------------------------------------------------------------------
@@ -154,6 +158,7 @@ class Database:
         cnt = self._conn.execute("SELECT COUNT(*) c FROM words").fetchone()["c"]
         if cnt > 0:
             return
+        log.info("首次建库，写入种子违禁词库（%d 个分类）", len(_SEED_CATEGORIES))
         for name, color, words in _SEED_CATEGORIES:
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO categories(name,color) VALUES(?,?)",

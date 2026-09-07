@@ -59,6 +59,7 @@ def scan(payload: dict = Body(...)):
     for p in paths:
         if not Path(p).exists():
             raise HTTPException(400, f"路径不存在：{p}")
+    log.info("接收扫描请求: %d 个路径 %s", len(paths), paths)
     return get_manager().submit_paths(paths)
 
 
@@ -76,10 +77,14 @@ async def upload(file: UploadFile = File(...)):
     dst = config.MEDIA_DIR / safe_name
     try:
         with dst.open("wb") as f:
+            size = 0
             while chunk := await file.read(1024 * 1024):
                 f.write(chunk)
+                size += len(chunk)
+        log.info("网页上传文件已保存: %s（%.1f MB）", dst, size / 1048576)
     except Exception as e:  # noqa: BLE001
         dst.unlink(missing_ok=True)
+        log.exception("保存上传文件失败: %s", file.filename)
         raise HTTPException(500, f"保存上传文件失败：{e}") from e
     return get_manager().submit_paths([str(dst)])
 
@@ -277,6 +282,8 @@ def submit_cut(video_id: int, payload: dict = Body(...)):
     except (TypeError, ValueError):
         pad = 0.3
     job_id = get_cut_manager().submit(video_id, hit_ids, pad)
+    log.info("提交去词请求: 视频 #%s, %d 个命中, pad=%.2f → 任务 #%s",
+             video_id, len(hit_ids), pad, job_id)
     return {"job_id": job_id}
 
 
@@ -442,7 +449,9 @@ def export(payload: dict = Body(default={})):
 # ----------------------------------------------------------------------
 @router.get("/settings")
 def get_settings():
-    return config.load_settings()
+    data = config.load_settings()
+    data["log_dir"] = str(config.LOGS_DIR)
+    return data
 
 
 @router.post("/settings")
@@ -456,8 +465,12 @@ def save_settings(payload: dict = Body(...)):
         merged["max_workers"] = max(1, min(8, int(merged["max_workers"])))
     except (TypeError, ValueError):
         merged["max_workers"] = 1
+    log.info("保存设置: log_level=%s model=%s device=%s compute=%s workers=%s theme=%s",
+             merged.get("log_level"), merged.get("model"), merged.get("device"),
+             merged.get("compute_type"), merged.get("max_workers"), merged.get("theme"))
     config.save_settings(merged)
     get_manager().reload_settings(merged)
+    _apply_log_level(merged.get("log_level"))
     return merged
 
 
@@ -498,6 +511,67 @@ def status():
         "model_guide": guide,              # 模型缺失时的手动下载引导（含链接与目标目录）
         "version": config.APP_VERSION,
     }
+
+
+# ----------------------------------------------------------------------
+# 日志与排障（前端错误上报 / 查看日志 / 打开日志目录）
+# ----------------------------------------------------------------------
+_LOGGER_LEVELS = {
+    "debug": logging.DEBUG, "info": logging.INFO, "log": logging.INFO,
+    "warning": logging.WARNING, "warn": logging.WARNING,
+    "error": logging.ERROR, "critical": logging.CRITICAL,
+}
+
+
+def _apply_log_level(level: str | None) -> None:
+    """把设置里的 log_level 实时应用到根 logger。"""
+    import logging as _logging
+
+    if level == "debug":
+        _logging.getLogger().setLevel(_logging.DEBUG)
+        log.info("已实时开启「详细日志模式」(DEBUG)")
+    elif level == "info":
+        _logging.getLogger().setLevel(_logging.INFO)
+        log.info("日志级别已切回 info")
+
+
+@router.post("/log")
+def client_log(payload: dict = Body(...)):
+    """接收前端上报的 console/未捕获错误，汇入根日志（logger=frontend）。"""
+    level = str(payload.get("level") or "info").lower()
+    lvl = _LOGGER_LEVELS.get(level, logging.INFO)
+    msg = str(payload.get("message") or "")[:2000]
+    extra = str(payload.get("extra") or "")[:4000]
+    logging.getLogger("frontend").log(
+        lvl, "客户端日志: %s%s", msg, ("\n" + extra) if extra else "")
+    return {"ok": True}
+
+
+@router.get("/logs/tail")
+def log_tail(lines: int = 300):
+    """返回 logs/app.log 最近 N 行（前端日志查看用）。"""
+    lines = max(10, min(5000, int(lines)))
+    p = config.LOGS_DIR / "app.log"
+    if not p.exists():
+        return {"path": str(p), "lines": [], "note": "日志文件尚未生成（服务刚启动或未运行过）"}
+    try:
+        data = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception as e:  # noqa: BLE001
+        return {"path": str(p), "lines": [], "note": f"读取日志失败: {e}"}
+    return {"path": str(p), "lines": data[-lines:]}
+
+
+@router.post("/logs/open")
+def open_logs_dir():
+    """打开软件根目录 logs 文件夹（仅本机服务，供用户取日志）。"""
+    config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        import os
+
+        os.startfile(str(config.LOGS_DIR))  # type: ignore[attr-defined]
+        return {"ok": True, "path": str(config.LOGS_DIR)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"打开日志目录失败：{e}") from e
 
 
 @router.post("/shutdown")
