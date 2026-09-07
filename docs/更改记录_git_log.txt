@@ -1,3 +1,5 @@
+5f022f1 2026-09-07 feat(delete): 「删除文件」改为文件入回收站+转写记录保留并标记file_deleted(schema v2自动迁移)；「删除」仅删记录 (v1.5.0)
+d97ad74 2026-09-07 docs: 导出git变更记录(v1.4.0 首启自举)
 c37a994 2026-09-07 fix(cuda): wheel解压改手动写入剥离nvidia前缀(结构更干净)，全链路验证通过(下载+SHA256+11 DLL核对)；重打包v1.4.0(149.1MB)
 19597a1 2026-09-07 fix(cuda): wheel完整性校验以SHA256为权威(修复MB/MiB误判)，已下载wheel复用；开发文档同步首启自举架构
 ba2d0ac 2026-09-07 feat(first-run): CUDA运行库与全部whisper模型改为首启自动下载——国内镜像(ModelScope/清华PyPI)+文件清单+大小SHA256校验+断点续传+就绪判定，打包排除nvidia使zip缩至约150MB (v1.4.0)
