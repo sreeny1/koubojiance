@@ -37,7 +37,8 @@ WHEELS_DIR = RUNTIME_DIR / "wheels"
 MANIFEST_PATH = RUNTIME_DIR / "manifests" / "cuda.json"
 
 # ---- CUDA 运行库清单（固定版本，与 requirements.txt 的 GPU 依赖一致）----
-# size 为 wheel 下载体积（MB，用于界面展示）；required 为解压后的关键文件（相对 NVIDIA_DIR）
+# size 为 wheel 下载体积（十进制 MB，仅用于界面展示/估算）；完整性以 SHA256（镜像索引官方哈希）为准；
+# required 为解压后的关键文件（相对 NVIDIA_DIR），全部存在才算就绪
 CUDA_PKGS: list[dict] = [
     {
         "name": "nvidia-cublas-cu12",
@@ -244,7 +245,7 @@ def download_cuda_runtime(
     WHEELS_DIR.mkdir(parents=True, exist_ok=True)
     n = len(CUDA_PKGS)
     files = [
-        {"name": p["name"], "size": p["size"] * 1048576,
+        {"name": p["name"], "size": p["size"] * 1_000_000,
          "status": "done" if _pkg_installed(p) else "pending"}
         for p in CUDA_PKGS
     ]
@@ -272,16 +273,27 @@ def download_cuda_runtime(
             continue
 
         whl = WHEELS_DIR / pkg["wheel"]
-        need_download = not _verify_wheel(whl)
         state["source"] = None
         try:
-            if need_download:
-                label, url, sha = _resolve_wheel(pkg)
+            label, url, sha = _resolve_wheel(pkg)
+            # 已下载的 wheel 先复用：非空并按官方 SHA256 复核，不符才删除重下
+            if whl.is_file() and whl.stat().st_size >= 10 * 1024 * 1024:
+                actual = _sha256_file(whl)
+                if not sha or actual == sha:
+                    _mark_wheel(whl, sha or actual)
+                    log.info("CUDA wheel 已存在且校验通过，复用: %s（%.1f MB）",
+                             pkg["name"], whl.stat().st_size / 1_000_000)
+                else:
+                    whl.unlink(missing_ok=True)
+                    whl.with_suffix(".ok").unlink(missing_ok=True)
+                    log.warning("CUDA wheel 已存在但 SHA256 不符，删除重下: %s",
+                                pkg["name"])
+            if not _verify_wheel(whl):
                 state["source"] = label
                 state["current_file"] = pkg["wheel"]
                 state["file_index"] = i
                 state["files"][i]["status"] = "downloading"
-                state["total"] = pkg["size"] * 1048576
+                state["total"] = pkg["size"] * 1_000_000
                 state["downloaded"] = whl.stat().st_size if whl.exists() else 0
                 _emit()
 
@@ -290,29 +302,29 @@ def download_cuda_runtime(
                     state["overall"] = overall
                     state["frac"] = overall
                     state["file_progress"] = frac
-                    state["downloaded"] = int(frac * pkg["size"] * 1048576)
+                    state["downloaded"] = int(frac * pkg["size"] * 1_000_000)
                     if progress:
                         progress(overall)
                     _emit()
 
-                log.info("开始下载 CUDA 运行库 %s（%d MB）: %s",
+                log.info("开始下载 CUDA 运行库 %s（约 %d MB）: %s",
                          pkg["name"], pkg["size"], url)
                 download_file(url, whl, retries=8, progress=on_f,
                               cancel_check=cancel_check)
-                # 大小 + SHA256 双重校验：任何一项不对都删掉重下
-                if whl.stat().st_size != pkg["size"] * 1048576:
-                    raise RuntimeError(
-                        f"wheel 大小不符: 期望 ~{pkg['size']}MB，实际 "
-                        f"{whl.stat().st_size / 1048576:.1f}MB")
+                # 完整性校验：非空 + SHA256（镜像索引官方哈希，权威判定），
+                # 任一不符即删除损坏文件并整体失败（外层重试/切源）
+                if whl.stat().st_size < 10 * 1024 * 1024:  # 最小体积防线（防截断为0）
+                    whl.unlink(missing_ok=True)
+                    whl.with_suffix(".ok").unlink(missing_ok=True)
+                    raise RuntimeError(f"wheel 文件过小（疑似截断）: {whl.name}")
                 actual = _sha256_file(whl)
                 if sha and actual != sha:
                     whl.unlink(missing_ok=True)
                     whl.with_suffix(".ok").unlink(missing_ok=True)
                     raise RuntimeError(f"SHA256 校验失败: {pkg['name']}")
-                log.info("CUDA wheel 校验通过: %s（sha256=%s…）", pkg["name"], actual[:16])
+                log.info("CUDA wheel 校验通过: %s（%.1f MB，sha256=%s…）",
+                         pkg["name"], whl.stat().st_size / 1_000_000, actual[:16])
                 _mark_wheel(whl, sha or actual)
-            else:
-                log.info("CUDA wheel 已下载过（校验标记在），跳过下载: %s", pkg["name"])
 
             _install_wheel(whl, NVIDIA_DIR)
             missing = [rel for rel in pkg["required"]
