@@ -1,5 +1,7 @@
-[main 7aad93c] docs: 补充v1.3.0打包结论（CUDA库封装/打包tar坑/版本号递增约定）
- 2 files changed, 8 insertions(+), 3 deletions(-)
+c37a994 2026-09-07 fix(cuda): wheel解压改手动写入剥离nvidia前缀(结构更干净)，全链路验证通过(下载+SHA256+11 DLL核对)；重打包v1.4.0(149.1MB)
+19597a1 2026-09-07 fix(cuda): wheel完整性校验以SHA256为权威(修复MB/MiB误判)，已下载wheel复用；开发文档同步首启自举架构
+ba2d0ac 2026-09-07 feat(first-run): CUDA运行库与全部whisper模型改为首启自动下载——国内镜像(ModelScope/清华PyPI)+文件清单+大小SHA256校验+断点续传+就绪判定，打包排除nvidia使zip缩至约150MB (v1.4.0)
+ef01008 2026-09-07 docs: 导出git变更记录
 7aad93c 2026-09-07 docs: 补充v1.3.0打包结论（CUDA库封装/打包tar坑/版本号递增约定）
 8d25ab6 2026-09-07 docs: 导出git变更记录（含详细日志模式提交）
 5ea5b52 2026-09-07 feat(log): 详细日志模式——服务端/前端/启动器日志统一写入软件根目录 logs/，含DEBUG开关与日志查看/打开目录
@@ -24,4 +26,3 @@ ceb8f16 2026-09-05 fix(ui): 拖放覆盖层适配深色模式（与主题设置�
 8092bad 2026-09-05 feat(dnd): 支持拖入文件夹+文件混合，美化拖放覆盖层
 83bd1a5 2026-09-05 feat(cut): 自定义去除违禁词（ffmpeg 精确切割 + 备份 + 自动重检）
 1f2dd88 2026-09-05 chore: baseline v1.1.0 (违禁词检测)
-warning: in the working copy of 'docs/开发日志.md', LF will be replaced by CRLF the next time Git touches it
