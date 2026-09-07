@@ -133,16 +133,22 @@ class WhisperEngine:
 
     # ------------------------------------------------------------------
     def _load_model_once(self, model_name: str, device: str, compute: str):
-        """带 HF 镜像回退的模型加载。"""
+        """带 HF 镜像回退的模型加载。
+
+        只有在模型需"在线下载"时才做镜像回退；本地已下载模型的加载失败
+        （如词表缺失）属于模型/文件问题，切镜像重试同一本地路径毫无意义，还误导日志。
+        """
         from faster_whisper import WhisperModel
 
+        # model_name 是已解析结果：本地目录路径 / 在线模型名
+        is_local = Path(model_name).is_dir()
         try:
             return WhisperModel(
                 model_name, device=device, compute_type=compute,
                 download_root=str(MODELS_DIR),
             )
         except Exception as e:  # noqa: BLE001
-            if self._switch_to_mirror():
+            if not is_local and self._switch_to_mirror():
                 log.warning("官方源下载失败，已切换 hf-mirror 镜像重试: %s", e)
                 return WhisperModel(
                     model_name, device=device, compute_type=compute,
