@@ -870,26 +870,35 @@ function renderModelDownload(s) {
   dz.classList.add("disabled");
 
   const dl = s.model_download || {};
+  const stage = dl.stage || "model";
   const files = dl.files || (s.model_guide ? s.model_guide.files : []);
   const overall = dl.overall != null ? dl.overall : (dl.frac || 0);
   const active = !!dl.active;
   const modelName = dl.name || (s.model_guide && s.model_guide.name) || "";
+  const isCuda = stage === "cuda";
 
   // 总大小估计
   let totalBytes = 0, hasSizes = false;
   (files || []).forEach((f) => { if (f.size) { totalBytes += f.size; hasSizes = true; } });
-  const totalText = hasSizes ? `约 ${fmtBytes(totalBytes)}` : "约 3 GB";
+  const totalText = hasSizes ? `约 ${fmtBytes(totalBytes)}` : (isCuda ? "约 1.4 GB" : "约 3 GB");
 
-  // 区分"首次使用（本地无任何模型）"与"切换模型（已有其它模型）"
+  // 区分"CUDA 运行库（首启）"/"首次使用（本地无任何模型）"/"切换模型"
   const isFirst = !s.has_any_model;
-  $("#mdlTitle").textContent = isFirst
-    ? "首次使用 · 正在准备语音识别模型"
-    : `切换模型 · 正在下载识别模型「${esc(modelName || "…")}」`;
-  $("#mdlSub").innerHTML = isFirst
-    ? `程序需要下载识别模型（${totalText}）才能开始转写，仅需一次。` +
-      `下载完成后即可拖入视频检测。请保持网络畅通，<b>完成前请先不要拖入视频</b>。`
-    : `检测到识别模型已切换为「${esc(modelName || "…")}」，需要下载（${totalText}）才能开始转写。` +
-      `下载完成后即可恢复拖入检测，<b>完成前请先不要拖入视频</b>。`;
+  if (isCuda) {
+    $("#mdlTitle").textContent = "首次使用 · 正在下载 NVIDIA 运行库";
+    $("#mdlSub").innerHTML =
+      `检测到 <b>NVIDIA 显卡</b>，自动下载 CUDA 加速运行库（${totalText}，仅需一次，国内高速源+SHA256校验）。` +
+      `下载完成后将自动继续准备语音识别模型并启用 <b>GPU 加速</b>。<b>完成前请先不要拖入视频</b>。`;
+  } else {
+    $("#mdlTitle").textContent = isFirst
+      ? "首次使用 · 正在准备语音识别模型"
+      : `切换模型 · 正在下载识别模型「${esc(modelName || "…")}」`;
+    $("#mdlSub").innerHTML = isFirst
+      ? `程序需要下载识别模型（${totalText}）才能开始转写，仅需一次。` +
+        `下载完成后即可拖入视频检测。请保持网络畅通，<b>完成前请先不要拖入视频</b>。`
+      : `检测到识别模型已切换为「${esc(modelName || "…")}」，需要下载（${totalText}）才能开始转写。` +
+        `下载完成后即可恢复拖入检测，<b>完成前请先不要拖入视频</b>。`;
+  }
 
   $("#mdlSrc").textContent = dl.source ? `下载源：${esc(dl.source)}` : (active ? "正在连接下载源…" : "准备中…");
 
@@ -1003,12 +1012,18 @@ async function refreshStatus() {
       const sizeText = dl.files?.some((f) => f.size)
         ? `（约 ${fmtBytes(dl.files.reduce((sum, f) => sum + (f.size || 0), 0))}，断点续传）`
         : "（断点续传）";
-      $("#engineBadge").textContent = `引擎：正在下载模型 ${dl.name} ${pct}%`;
-      $("#engineInfo").innerHTML =
-        `正在从<b>${esc(dl.source || "国内源")}</b>自动下载识别模型 <b>${esc(dl.name)}</b>${sizeText}… <b>${pct}%</b><br>` +
-        `下载完成后即可开始转写，无需任何手动操作。` +
-        (dl.error ? `<br><span class="err-text">下载失败：${esc(dl.error)}，程序会在下次使用时自动续传重试</span>` +
-          renderModelGuide(s.model_guide) : "");
+      const isCuda = dl.stage === "cuda";
+      $("#engineBadge").textContent = isCuda
+        ? `引擎：正在下载 NVIDIA 运行库 ${pct}%`
+        : `引擎：正在下载模型 ${dl.name} ${pct}%`;
+      $("#engineInfo").innerHTML = isCuda
+        ? `正在从<b>${esc(dl.source || "国内镜像")}</b>自动下载 CUDA 加速运行库 <b>NVIDIA</b>${sizeText}… <b>${pct}%</b><br>` +
+          `下载完成并校验通过后自动启用 GPU 加速；若失败将降级 CPU 模式（不影响转写）。` +
+          (dl.cuda_error ? `<br><span class="err-text">CUDA 运行库下载失败：${esc(dl.cuda_error)}，程序将继续以 CPU 模式运行</span>` : "")
+        : `正在从<b>${esc(dl.source || "国内源")}</b>自动下载识别模型 <b>${esc(dl.name)}</b>${sizeText}… <b>${pct}%</b><br>` +
+          `下载完成后即可开始转写，无需任何手动操作。` +
+          (dl.error ? `<br><span class="err-text">下载失败：${esc(dl.error)}，程序会在下次使用时自动续传重试</span>` +
+            renderModelGuide(s.model_guide) : "");
       return;
     }
     const eff = s.effective;

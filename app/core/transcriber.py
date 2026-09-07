@@ -103,29 +103,52 @@ class WhisperEngine:
 
     @staticmethod
     def _setup_cuda_dlls() -> None:
-        """把 .venv 内 nvidia pip 包的 CUDA DLL 目录注册进搜索路径。
+        """注册 CUDA DLL 搜索路径（两处来源，都可靠）：
+
+        1. 完整包/开发环境：.venv site-packages 内 nvidia pip 包；
+        2. 绿色便携包（v1.4.0 起）：首启自动下载到 data/runtime/nvidia 的独立运行库。
 
         两手准备：
         1. os.add_dll_directory：覆盖带 LOAD_LIBRARY_SEARCH_USER_DIRS 标志的加载；
         2. 前置到进程 PATH：cudnn64_9.dll 内部会用默认搜索路径加载其子组件
            （cudnn_ops64_9.dll 等），只有 PATH 方式对它生效。
         """
+        prepend: list[str] = []
+        # 1) site-packages/nvidia（pip 安装）
         try:
             import nvidia  # noqa: F401  由 nvidia-cublas-cu12 / nvidia-cudnn-cu12 提供
+
+            for pkg_path in getattr(nvidia, "__path__", []):
+                base = Path(pkg_path)
+                for sub in base.iterdir():
+                    for bin_name in ("bin", "lib"):
+                        d = sub / bin_name
+                        if d.is_dir():
+                            prepend.append(str(d))
         except ImportError:
-            return
-        # nvidia 是命名空间包（__file__ 为 None），从 __path__ 取实际目录
-        prepend: list[str] = []
-        for pkg_path in getattr(nvidia, "__path__", []):
-            base = Path(pkg_path)
-            for sub in base.iterdir():
-                for bin_name in ("bin", "lib"):
-                    d = sub / bin_name
-                    if d.is_dir():
-                        os.add_dll_directory(str(d))
-                        prepend.append(str(d))
+            log.debug("未找到 site-packages/nvidia（绿色便携包场景，走首启下载运行库）")
+        except Exception:  # noqa: BLE001
+            pass
+        # 2) data/runtime/nvidia（首启自动下载解压）
+        try:
+            from .cuda_setup import cuda_bin_dirs
+
+            prepend.extend(cuda_bin_dirs())
+        except Exception as e:  # noqa: BLE001
+            log.debug("cuda_setup 初始化失败（忽略）: %s", e)
+
+        seen: set[str] = set()
+        for d in prepend:
+            if d in seen:
+                continue
+            seen.add(d)
+            try:
+                os.add_dll_directory(str(d))
+            except Exception:  # noqa: BLE001
+                pass
         if prepend:
             os.environ["PATH"] = ";".join(prepend) + ";" + os.environ.get("PATH", "")
+            log.info("已注册 CUDA DLL 目录（%d 个）: %s", len(seen), sorted(seen))
 
     @staticmethod
     def _cuda_available() -> bool:

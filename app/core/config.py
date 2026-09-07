@@ -19,6 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
 LOGS_DIR = BASE_DIR / "logs"            # 日志统一放这里（软件根目录/logs）
 MODELS_DIR = DATA_DIR / "models"        # whisper 模型缓存
+RUNTIME_DIR = DATA_DIR / "runtime"      # 首启自动下载的运行时（CUDA 库 wheel/解压目录/清单）
 MEDIA_DIR = DATA_DIR / "media"          # 网页拖拽上传的视频落地目录
 SUBTITLES_DIR = DATA_DIR / "subtitles"  # 导出的 SRT 字幕
 EXPORTS_DIR = DATA_DIR / "exports"      # 导出的 Excel 报告
@@ -27,7 +28,7 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 
 # ---- 应用版本（每次发布更新此号；界面/日志/状态接口统一读取）----
 APP_NAME = "口播违禁词检测"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     # 转写模型：large-v3 准确率最高；备选 medium / small / large-v3-turbo（更快）

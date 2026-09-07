@@ -57,6 +57,14 @@ Write-Host "[2/6] copy portable python runtime ..."
 # (avoid leaking global packages / conflicts). Only the venv site-packages is shipped.
 Copy-Tree $PyBase (Join-Path $Out "python") @("__pycache__", "pip-cache", "site-packages", "Scripts")
 Copy-Tree (Join-Path $Venv "Lib\site-packages") (Join-Path $Out "python\Lib\site-packages")
+# IMPORTANT (v1.4.0): NVIDIA CUDA runtime is NOT bundled anymore - it is
+# auto-downloaded at first launch (data/runtime/nvidia). Excluding it saves
+# about 1.3GB from the zip. AMD/Intel machines never download it.
+$sp = Join-Path $Out "python\Lib\site-packages"
+if (Test-Path $sp) {
+    Get-ChildItem $sp -Filter "nvidia*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+    Write-Host "  nvidia CUDA packages excluded (first-run auto download)" 
+}
 
 Write-Host "[3/6] copy project files ..."
 Copy-Tree (Join-Path $Root "app") (Join-Path $Out "app")
@@ -64,7 +72,7 @@ Copy-Tree (Join-Path $Root "docs") (Join-Path $Out "docs")
 Copy-Tree (Join-Path $Root "tools") (Join-Path $Out "tools")
 robocopy (Join-Path $Root "tests") (Join-Path $Out "tests") /E /XD __pycache__ media /NFL /NDL /NJH /NJS /NP | Out-Null
 # data: exclude pip-cache / models / webview2-data (model auto-downloaded on first run)
-robocopy (Join-Path $Root "data") (Join-Path $Out "data") /E /XD __pycache__ pip-cache models webview2-data /NFL /NDL /NJH /NJS /NP | Out-Null
+robocopy (Join-Path $Root "data") (Join-Path $Out "data") /E /XD __pycache__ pip-cache models webview2-data runtime /NFL /NDL /NJH /NJS /NP | Out-Null
 Copy-Item (Join-Path $Root "README.md") $Out -Force
 Copy-Item (Join-Path $Root "requirements.txt") $Out -Force
 # Chinese-named launcher exe and 启动.bat, located via wildcard (ASCII-safe)

@@ -11,6 +11,8 @@ ModelScope 不支持该模型时回退 HuggingFace hf-mirror 直连。
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import time
@@ -20,9 +22,12 @@ from typing import Callable
 
 import httpx
 
-from .config import MODELS_DIR
+from .config import MODELS_DIR, RUNTIME_DIR
 
 log = logging.getLogger("model_download")
+
+# 模型文件清单落盘目录（data/runtime/manifests/<model>.json）
+MANIFESTS_DIR = RUNTIME_DIR / "manifests"
 
 LOCAL_MODELS = MODELS_DIR / "local"
 
@@ -55,6 +60,79 @@ _MODEL_FILES_EXPECTED = {
 MS_AVAILABLE = {"large-v3", "large-v3-turbo", "medium", "small", "base", "tiny"}
 
 
+# ----------------------------------------------------------------------
+# 模型文件清单（首启下载的依据，防止遗漏/残缺）
+# ----------------------------------------------------------------------
+def _needless_manifest_file(name: str) -> bool:
+    """清单中无需下载的非必需文件（说明/附属文件）。"""
+    low = name.lower()
+    return (name.startswith(".") or
+            low.startswith(("readme", "license", "changelog", "notice", "security")))
+
+
+def _fetch_ms_manifest(name: str) -> list[dict] | None:
+    """从 ModelScope 仓库文件 API 拉取真实文件清单（文件名/大小/SHA256）。
+
+    返回 [{name, size, sha256}, ...]（已滤掉 README/.gitattributes 等）；
+    无效或网络失败返回 None，由调用方回退到内置清单 + HEAD 探测。
+    """
+    try:
+        url = (f"https://modelscope.cn/api/v1/models/Systran/faster-whisper-{name}"
+               "/repo/files")
+        r = httpx.get(url, timeout=25, trust_env=False)
+        if r.status_code != 200:
+            log.debug("ModelScope 清单 API 返回 %s（%s）", r.status_code, name)
+            return None
+        data = r.json().get("Data") or {}
+        files = data.get("Files") or []
+        out: list[dict] = []
+        for f in files:
+            fn = f.get("Name") or f.get("Path")
+            if not fn or _needless_manifest_file(fn):
+                continue
+            size = f.get("Size")
+            out.append({
+                "name": fn,
+                "size": size if isinstance(size, int) and size > 0 else None,
+                "sha256": (f.get("Sha256") or None),
+            })
+        names = {f["name"] for f in out}
+        # 清单必须覆盖核心 3 文件 + 至少一个词表，否则视为无效（回退探测）
+        if set(_CORE_FILES) <= names and names & set(_VOCAB_FILES):
+            log.info("ModelScope 清单获取成功: %s（%d 个文件）", name, len(out))
+            return out
+        log.warning("ModelScope 清单不完整（%s），回退探测", name)
+    except Exception as e:  # noqa: BLE001
+        log.warning("ModelScope 清单获取异常（%s）: %s", name, e)
+    return None
+
+
+def save_local_manifest(name: str, files: list[dict]) -> None:
+    """下载完成并校验通过后，把清单落盘（后续启动按此核对，防遗漏）。"""
+    try:
+        MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
+        (MANIFESTS_DIR / f"{name}.json").write_text(
+            json.dumps({"model": name, "files": files},
+                       ensure_ascii=False, indent=2),
+            encoding="utf-8")
+    except Exception as e:  # noqa: BLE001
+        log.warning("模型清单落盘失败: %s", e)
+
+
+def load_local_manifest(name: str) -> list[dict] | None:
+    """读取上次下载成功的清单（无则 None）。"""
+    try:
+        p = MANIFESTS_DIR / f"{name}.json"
+        if p.is_file():
+            data = json.loads(p.read_text(encoding="utf-8"))
+            files = data.get("files")
+            if isinstance(files, list) and files:
+                return files
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def local_model_path(name: str) -> Path:
     return LOCAL_MODELS / name
 
@@ -69,7 +147,21 @@ def is_model_ready(name: str) -> bool:
     d = local_model_path(name)
     if not all((d / f).is_file() for f in _CORE_FILES):
         return False
-    return any((d / f).is_file() for f in _VOCAB_FILES)
+    if not any((d / f).is_file() for f in _VOCAB_FILES):
+        return False
+    # 有本地清单则按清单全量核对（存在 + 大小），保证不遗漏/不残缺
+    manifest = load_local_manifest(name)
+    if manifest:
+        for f in manifest:
+            fp = d / f["name"]
+            if not fp.is_file():
+                return False
+            size = f.get("size")
+            if size and fp.stat().st_size != size:
+                log.warning("模型文件大小不符: %s（期望 %s，实际 %s）",
+                            f["name"], size, fp.stat().st_size)
+                return False
+    return True
 
 
 def ms_exists(name: str) -> bool:
@@ -96,9 +188,19 @@ def ms_exists(name: str) -> bool:
     return False
 
 
+def _sha256_file(path: Path) -> str:
+    """流式计算文件 SHA256（大文件也不会撑爆内存）。"""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8 * 1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def download_file(url: str, dst: Path, retries: int = 10,
                   progress: Callable[[float], None] | None = None,
-                  cancel_check: Callable[[], bool] | None = None) -> None:
+                  cancel_check: Callable[[], bool] | None = None,
+                  sha256_expected: str | None = None) -> None:
     """断点续传下载单文件（ModelScope/HF CDN 均支持 Range）。
 
     progress 回调：单个文件已下载比例(0~1)。
@@ -140,6 +242,10 @@ def download_file(url: str, dst: Path, retries: int = 10,
             time.sleep(attempt * 3)  # 指数退避重试
     if tmp.exists():
         size = tmp.stat().st_size
+        # 完整性双保险：大小（上面 done<total 已查）+ 清单 SHA256
+        if sha256_expected and _sha256_file(tmp) != sha256_expected:
+            tmp.unlink(missing_ok=True)
+            raise RuntimeError(f"SHA256 校验失败，已删除损坏文件: {dst.name}")
         os.replace(tmp, dst)
         log.info("文件下载完成: %s（%.2f MB，耗时 %.1fs）",
                  dst.name, size / 1048576, time.monotonic() - t0)
@@ -184,7 +290,16 @@ def manual_download_guide(name: str) -> dict:
 
 
 def _initial_files(name: str) -> list[dict]:
-    """构造模型文件清单（大小用估算值，存在标记按本地判断）。"""
+    """构造模型文件清单：优先用真实清单（ModelScope API / 本地留档），
+    大小真实、无遗漏；API 不可用时回退内置估算清单。"""
+    manifest = load_local_manifest(name) or _fetch_ms_manifest(name)
+    if manifest:
+        return [
+            {"name": f["name"], "size": f.get("size"),
+             "exists": (local_model_path(name) / f["name"]).is_file(),
+             "status": "done" if (local_model_path(name) / f["name"]).is_file() else "pending"}
+            for f in manifest
+        ]
     files = _MODEL_FILES_EXPECTED.get(name, MODEL_FILES)
     return [
         {"name": f, "size": _estimate_size(name, f), "exists": (local_model_path(name) / f).is_file(),
@@ -277,9 +392,17 @@ def _download_from(base: str, name: str, file_list: list[str], target_dir: Path,
                    progress: Callable[[float], None] | None,
                    cancel_check: Callable[[], bool] | None,
                    src_label: str,
-                   state_cb: Callable[[dict], None] | None = None) -> None:
-    """从单个源下载指定文件（断点续传）。file_list 为该源实际存在的文件。"""
+                   state_cb: Callable[[dict], None] | None = None,
+                   manifest: list[dict] | None = None) -> None:
+    """从单个源下载指定文件（断点续传 + SHA256 清单校验）。
+
+    file_list 为该源实际存在的文件；manifest 提供各文件的真实大小与 SHA256
+    （ModelScope 仓库 API），下载完成立即校验，防止大文件损坏/截断。
+    """
     sizes = _fetch_file_sizes(base, name)
+    if manifest:
+        sizes = {f["name"]: f.get("size") for f in manifest if f.get("size")}
+    sha_map = {f["name"]: f.get("sha256") for f in manifest} if manifest else {}
     files = []
     for fname in file_list:
         exists = (target_dir / fname).is_file()
@@ -318,7 +441,9 @@ def _download_from(base: str, name: str, file_list: list[str], target_dir: Path,
         def on_f(frac: float, _state=state, _i=i) -> None:
             _set_file(_state, frac, _i, name, progress, state_cb)
 
-        download_file(url, target_dir / fname, progress=on_f, cancel_check=cancel_check)
+        download_file(url, target_dir / fname, progress=on_f,
+                      cancel_check=cancel_check,
+                      sha256_expected=sha_map.get(fname))
         state["files"][i]["status"] = "done"
         state["files"][i]["exists"] = True
         state["overall"] = (i + 1) / n
@@ -344,14 +469,24 @@ def download_model(name: str,
     sources = _pick_sources(name)
     log.info("模型 %s 本地未就绪，开始下载。源优先级: %s",
              name, " → ".join(label for label, _ in sources))
+    # 从 ModelScope 文件清单 API 拉取真实文件清单（大小/SHA256，保证不遗漏）
+    manifest = _fetch_ms_manifest(name)
+    manifest_names = [f["name"] for f in manifest] if manifest else None
     last_err: Exception | None = None
     for label, base in sources:
         try:
             log.info("使用下载源: %s", label)
-            file_list = _resolve_source_files(base, name)
-            _download_from(base, name, file_list, target_dir, progress, cancel_check, label, state_cb)
+            if manifest_names:
+                file_list = manifest_names
+                log.info("按清单下载 %d 个文件（ModelScope 仓库 API 确认）", len(file_list))
+            else:
+                file_list = _resolve_source_files(base, name)
+            _download_from(base, name, file_list, target_dir, progress,
+                           cancel_check, label, state_cb, manifest=manifest)
             if is_model_ready(name):
-                log.info("模型 %s 下载完成（源: %s），就绪校验通过", name, label)
+                log.info("模型 %s 下载完成（源: %s），清单就绪校验通过", name, label)
+                if manifest:
+                    save_local_manifest(name, manifest)
                 return
             log.warning("源 %s 下载结束但就绪校验未通过，尝试下一源", label)
         except _DownloadCanceled:

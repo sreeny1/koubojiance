@@ -55,7 +55,7 @@ namespace LanJinCiLauncher
     static class Program
     {
         // 版本号：保持与 app/core/config.py 的 APP_VERSION 一致（每次发布同步更新）
-        private const string Ver = "1.3.0";
+        private const string Ver = "1.4.0";
         private const string AppTitle = "口播违禁词检测";
         private const string MutexName = "CS_LJJC_LAUNCHER_SINGLETON";
         private const int PortStart = 8765;
@@ -650,7 +650,7 @@ namespace LanJinCiLauncher
 
         // 类型名冲突规避：从 Program 暴露的常量更清晰
         private static string Program_AppTitle() { return "口播违禁词检测"; }
-        private static string Program_Ver() { return "1.3.0"; }
+        private static string Program_Ver() { return "1.4.0"; }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {

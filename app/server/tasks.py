@@ -49,34 +49,58 @@ class TaskManager:
 
     # ------------------------------------------------------------------
     def _start_model_predownload(self) -> None:
-        """首次启动若本地缺模型，自动从国内源后台下载（全自动，无需用户操作）。
+        """首次启动自动准备运行环境（全自动，无需用户操作）：
 
-        下载状态通过 state_cb 丰富为"每文件详情 + 进度"，供前端首启界面展示与拦截拖入。
+        1. NVIDIA 机器先自动下载 CUDA 运行库（data/runtime/nvidia，约1.36GB；
+           AMD/Intel/无独显机器完全跳过）；
+        2. 再下载/校验当前选择的 whisper 模型（data/models/local/<name>）。
+        下载源均为国内高速源；断点续传 + 文件清单（大小/SHA256）校验 + 就绪判定，
+        保证大文件/小文件都完整、不遗漏。
         """
         name = self.settings.get("model", "large-v3")
-        if self.engine.is_model_ready(name):
+        need_cuda = False
+        try:
+            from core.cuda_setup import is_cuda_runtime_ready, need_cuda_runtime
+
+            need_cuda = need_cuda_runtime() and not is_cuda_runtime_ready()
+        except Exception:  # noqa: BLE001
+            log.debug("CUDA 判定失败（按不需要处理）", exc_info=True)
+        need_model = not self.engine.is_model_ready(name)
+        if not need_cuda and not need_model:
             return
 
-        # 初始状态：文件清单（本地存在标记），供前端立即渲染
+        # 初始状态：先展示 CUDA 阶段（如需要），否则直接模型清单
         try:
             from core.model_downloader import _initial_files
             files = _initial_files(name)
         except Exception:  # noqa: BLE001
             files = []
+        stage = "cuda" if need_cuda else "model"
         self._dl_state = {
-            "active": True, "name": name, "frac": 0.0, "overall": 0.0,
+            "active": True, "stage": stage,
+            "name": ("nvidia-cuda-runtime" if need_cuda else name),
+            "frac": 0.0, "overall": 0.0,
             "current_file": None, "file_index": -1,
-            "file_count": len(files), "file_progress": 0.0,
-            "files": files, "source": None,
+            "file_count": 3 if need_cuda else len(files), "file_progress": 0.0,
+            "files": [] if need_cuda else files, "source": None, "cuda_error": None,
         }
+
+        def _cuda_ready() -> bool:
+            try:
+                from core.cuda_setup import is_cuda_runtime_ready
+
+                return is_cuda_runtime_ready()
+            except Exception:  # noqa: BLE001
+                return False
 
         def _run() -> None:
             def on_state(st: dict) -> None:
                 # 合并"活跃/错误"字段，其余用下载器下发的每文件详情
                 st.setdefault("active", True)
-                # 兼容旧字段：始终保留 frac 与 overall（前端两处读取）
                 st.setdefault("overall", st.get("frac", 0.0))
                 st.setdefault("frac", st.get("overall", 0.0))
+                if "cuda_error" not in st:
+                    st["cuda_error"] = self._dl_state.get("cuda_error")
                 self._dl_state = st
 
             def on_p(frac: float) -> None:
@@ -84,18 +108,54 @@ class TaskManager:
                 self._dl_state["overall"] = frac
 
             try:
-                log.info("本地缺少模型 %s，开始自动下载（国内源，断点续传）", name)
-                self.engine.ensure_model(name, progress=on_p, state_cb=on_state)
+                if need_cuda:
+                    log.info("检测到 NVIDIA 显卡，开始自动下载 CUDA 运行库"
+                             "（国内 PyPI 镜像，断点续传 + SHA256，约1.36GB）")
+                    from core.cuda_setup import download_cuda_runtime
+
+                    download_cuda_runtime(progress=on_p, state_cb=on_state)
+                    log.info("CUDA 运行库下载/校验完成")
+                    self._dl_state["stage"] = "model"
+                    self._dl_state["name"] = name
+                    try:
+                        from core.model_downloader import _initial_files
+                        self._dl_state["files"] = _initial_files(name)
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._dl_state["overall"] = 0.0
+                    self._dl_state["frac"] = 0.0
+                # 模型阶段（CUDA 下载失败不阻断模型；CUDA 成功后模型下载前重判 device）
+                if not self.engine.is_model_ready(name):
+                    log.info("本地缺少模型 %s，开始自动下载"
+                             "（国内源，断点续传 + 清单/SHA256 校验）", name)
+                    self.engine.ensure_model(name, progress=on_p, state_cb=on_state)
                 self._dl_state["frac"] = 1.0
                 self._dl_state["overall"] = 1.0
-                log.info("模型 %s 自动下载完成", name)
+                log.info("首启运行环境就绪: 模型=%s, CUDA=%s",
+                         name, "就绪" if need_cuda and _cuda_ready()
+                         else ("不需要" if not need_cuda else "失败(将用CPU)"))
             except Exception as e:  # noqa: BLE001
-                self._dl_error = str(e)[:300]
-                log.exception("模型 %s 自动下载失败", name)
+                if need_cuda and not _cuda_ready():
+                    self._dl_state["cuda_error"] = str(e)[:300]
+                    # CUDA 下载失败不阻断模型：继续尝试模型（防止首启完全不可用）
+                    if not self.engine.is_model_ready(name):
+                        try:
+                            log.warning("CUDA 下载失败（%s），继续下载模型（将使用 CPU 模式）", e)
+                            self._dl_state["stage"] = "model"
+                            self._dl_state["name"] = name
+                            self.engine.ensure_model(name, progress=on_p, state_cb=on_state)
+                            self._dl_state["frac"] = 1.0
+                            self._dl_state["overall"] = 1.0
+                        except Exception as e2:  # noqa: BLE001
+                            self._dl_error = str(e2)[:300]
+                            log.exception("模型自动下载失败")
+                else:
+                    self._dl_error = str(e)[:300]
+                    log.exception("首启运行环境准备失败")
             finally:
                 self._dl_state["active"] = False
 
-        threading.Thread(target=_run, name="model-predownload", daemon=True).start()
+        threading.Thread(target=_run, name="runtime-predownload", daemon=True).start()
 
     @property
     def download_state(self) -> dict:
