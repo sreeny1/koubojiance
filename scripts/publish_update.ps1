@@ -1,18 +1,21 @@
 # Prepare an online-update release:
 #   1. bump version in config.py / Launcher.cs / README.md
 #   2. build app-only update zip
-#   3. write latest.json for the GitHub main branch
-#   4. optionally commit, push and create GitHub Release with gh
+#   3. optionally build full portable zip (for first manual install)
+#   4. write latest.json for the GitHub main branch
+#   5. optionally commit, push and create GitHub Release with gh
 #
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\publish_update.ps1 -Version 1.8.0 -Notes "fix xxx"
-#   powershell ... -Version 1.8.0 -Notes "fix xxx" -Publish
+#   powershell ... -Version 1.8.0 -Notes "fix xxx" -Full
+#   powershell ... -Version 1.8.0 -Notes "fix xxx" -Publish -Full
 #
 # ASCII-ONLY: PowerShell 5.1 on Chinese Windows parses BOM-less scripts as GBK.
 param(
     [Parameter(Mandatory=$true)][string]$Version,
     [string]$Notes = "Bug fixes and improvements.",
-    [switch]$Publish
+    [switch]$Publish,
+    [switch]$Full
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,25 +57,48 @@ Update-FirstRegex (Join-Path $Root "README.md") 'v\d+\.\d+\.\d+' "v$Version"
 & (Join-Path $PSScriptRoot "make_app_update.ps1") -Root $Root -Version $Version
 $metaPath = Join-Path $Root "build\updates\app-update.json"
 $meta = Get-Content $metaPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$appUrl = "https://github.com/$repo/releases/download/v$Version/$($meta.name)"
+$assets = [ordered]@{
+    app = [ordered]@{
+        name = [string]$meta.name
+        url = $appUrl
+        size = [int64]$meta.size
+        sha256 = [string]$meta.sha256
+    }
+}
+$assetPaths = @([string]$meta.path)
+
+# 2b) optional full portable zip for first manual install
+if ($Full) {
+    & (Join-Path $PSScriptRoot "pack_full.ps1") -Root $Root
+    $fullSource = Join-Path $Root "build\lianjinci-portable.zip"
+    if (-not (Test-Path $fullSource)) { throw "full portable zip not found: $fullSource" }
+    $fullName = "koubo-portable-v$Version.zip"
+    $fullZip = Join-Path $Root ("build\updates\" + $fullName)
+    Copy-Item $fullSource $fullZip -Force
+    $fullHash = (Get-FileHash $fullZip -Algorithm SHA256).Hash.ToLower()
+    $fullSize = (Get-Item $fullZip).Length
+    $fullUrl = "https://github.com/$repo/releases/download/v$Version/$fullName"
+    $assets["full"] = [ordered]@{
+        name = $fullName
+        url = $fullUrl
+        size = [int64]$fullSize
+        sha256 = $fullHash
+    }
+    $assetPaths += $fullZip
+    Write-Host "FULL ZIP: $fullZip"
+}
 
 # 3) write latest.json
-$assetUrl = "https://github.com/$repo/releases/download/v$Version/$($meta.name)"
 $latest = [ordered]@{
     version = $Version
     published_at = (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz")
     notes = $Notes
-    assets = [ordered]@{
-        app = [ordered]@{
-            name = [string]$meta.name
-            url = $assetUrl
-            size = [int64]$meta.size
-            sha256 = [string]$meta.sha256
-        }
-    }
+    assets = $assets
 }
 $latestJson = $latest | ConvertTo-Json -Depth 8
 Write-Utf8NoBom (Join-Path $Root "latest.json") ($latestJson + "`n")
-Write-Host "latest.json updated: $assetUrl"
+Write-Host "latest.json updated: $appUrl"
 
 $zipPath = [string]$meta.path
 Write-Host "APP ZIP: $zipPath"
@@ -108,13 +134,13 @@ try {
         "Git push done. One step remains: create the GitHub Release manually." | Set-Content $manual -Encoding UTF8
         "Repository : https://github.com/$repo" | Add-Content $manual -Encoding UTF8
         "Tag        : $tag" | Add-Content $manual -Encoding UTF8
-        "Asset      : $zipPath" | Add-Content $manual -Encoding UTF8
+        foreach ($p in $assetPaths) { "Asset      : $p" | Add-Content $manual -Encoding UTF8 }
         "Notes      : $Notes" | Add-Content $manual -Encoding UTF8
         Write-Host "gh not found. Manual instructions written to: $manual"
         exit 2
     }
 
-    & gh release create $tag $zipPath --repo $repo --title $tag --notes $Notes
+    & gh release create $tag @assetPaths --repo $repo --title $tag --notes $Notes
     if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
     Write-Host "GitHub Release created: $tag"
 } finally {

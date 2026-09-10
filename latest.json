@@ -1,13 +1,19 @@
 {
     "version":  "1.7.0",
-    "published_at":  "2026-09-10T21:38:41+08:00",
+    "published_at":  "2026-09-10T21:44:04+08:00",
     "notes":  "Add online update",
     "assets":  {
                    "app":  {
                                "name":  "koubo-app-v1.7.0.zip",
                                "url":  "https://github.com/smeeny1/koubojiance/releases/download/v1.7.0/koubo-app-v1.7.0.zip",
                                "size":  173350,
-                               "sha256":  "e2efa04e40dceae1e23b9f59616dd7f59be5b18fd5d2fc7dd54b3c51bce4680b"
-                           }
+                               "sha256":  "6a79bffae68a4fe9f48e31d813f79ac458b5e64716741002e68099675fca0b95"
+                           },
+                   "full":  {
+                                "name":  "koubo-portable-v1.7.0.zip",
+                                "url":  "https://github.com/smeeny1/koubojiance/releases/download/v1.7.0/koubo-portable-v1.7.0.zip",
+                                "size":  156379849,
+                                "sha256":  "b84254b70d9500a6db8381ec9ad9d61cceb564fd757833cfb6c6a187f5341075"
+                            }
                }
 }

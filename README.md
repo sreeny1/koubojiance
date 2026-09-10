@@ -109,6 +109,6 @@
 
 打包发布：`powershell -File scripts\pack_full.ps1`（生成绿色免安装包，模型首启自动下载）。
 
-在线更新发布：`powershell -File scripts\publish_update.ps1 -Version 1.8.0 -Notes "更新说明" -Publish`（需要本机 `gh` 已登录）。
+在线更新发布：`powershell -File scripts\publish_update.ps1 -Version 1.8.0 -Notes "更新说明" -Full -Publish`（`-Full` 会同时生成完整绿色包，第一次从旧版升级时必须提供；需要本机 `gh` 已登录）。
 
 开发文档见 `docs/开发文档.md`，过程记录见 `docs/开发日志.md`。
