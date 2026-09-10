@@ -41,7 +41,7 @@ function Update-FirstRegex([string]$Path, [string]$Pattern, [string]$Replacement
 # 1) read current values / repo
 $configPath = Join-Path $Root "app\core\config.py"
 $configText = [System.IO.File]::ReadAllText($configPath, [System.Text.Encoding]::UTF8)
-$repo = "smeeny1/koubojiance"
+$repo = "sreeny1/koubojiance"
 if ($configText -match 'UPDATE_REPO\s*=\s*"([^"]+)"') { $repo = $Matches[1] }
 $oldVersion = ""
 if ($configText -match 'APP_VERSION\s*=\s*"([^"]+)"') { $oldVersion = $Matches[1] }

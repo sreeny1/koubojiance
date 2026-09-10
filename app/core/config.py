@@ -32,7 +32,7 @@ APP_VERSION = "1.7.0"
 
 # ---- 在线更新 ----
 # 仓库地址固定；latest.json 放 main 分支根目录，更新包放 GitHub Releases。
-UPDATE_REPO = "smeeny1/koubojiance"
+UPDATE_REPO = "sreeny1/koubojiance"
 UPDATE_BRANCH = "main"
 UPDATE_MANIFEST_URL = (
     f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/latest.json"
