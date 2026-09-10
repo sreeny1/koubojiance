@@ -24,6 +24,17 @@ BASE = Path(__file__).resolve().parent
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
+# 最早阶段应用上次暂存的在线更新（只覆盖 app/，失败不影响本次启动）。
+# 辅助脚本通常已经在重启前完成；这里是双重保险。
+try:
+    from core import updater as _updater
+
+    _applied = _updater.apply_pending_update()
+    if _applied:
+        print(f"[updater] 已应用暂存更新 v{_applied.get('version')}")
+except Exception as _e:  # noqa: BLE001
+    print(f"[updater] 启动时应用暂存更新失败（已忽略）：{_e}")
+
 from core.config import (  # noqa: E402
     APP_NAME, APP_VERSION, BASE_DIR, DATA_DIR, LOGS_DIR, MODELS_DIR,
     ensure_dirs, load_settings,

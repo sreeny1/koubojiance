@@ -28,7 +28,26 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 
 # ---- 应用版本（每次发布更新此号；界面/日志/状态接口统一读取）----
 APP_NAME = "口播违禁词检测"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
+
+# ---- 在线更新 ----
+# 仓库地址固定；latest.json 放 main 分支根目录，更新包放 GitHub Releases。
+UPDATE_REPO = "smeeny1/koubojiance"
+UPDATE_BRANCH = "main"
+UPDATE_MANIFEST_URL = (
+    f"https://raw.githubusercontent.com/{UPDATE_REPO}/{UPDATE_BRANCH}/latest.json"
+)
+UPDATE_DIR = DATA_DIR / "updates"
+UPDATE_STAGING_DIR = UPDATE_DIR / "staging"
+UPDATE_PENDING_PATH = UPDATE_DIR / "pending.json"
+UPDATE_APPLIED_PATH = UPDATE_DIR / "applied.json"
+UPDATE_HELPER_PATH = UPDATE_DIR / "apply_update.ps1"
+
+# 国内直连 GitHub RAW / Release 失败时依次尝试镜像前缀。
+UPDATE_MIRROR_PREFIXES: tuple[str, ...] = (
+    "https://ghproxy.com/",
+    "https://mirror.ghproxy.com/",
+)
 
 # ---- 支持的转写模型（v1.6.0 起仅保留 large-v3，其它模型弃用）----
 ALLOWED_MODELS: tuple[str, ...] = ("large-v3",)
@@ -51,6 +70,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "log_level": "info",
     # 界面主题：system(跟随系统) / light(浅色) / dark(深色)
     "theme": "system",
+    # 在线更新：启动时自动检查；下载时是否使用国内镜像前缀
+    "update_auto_check": True,
+    "update_use_mirror": True,
     # 同时显示/检索的默认违禁词分类
     "ui": {
         "accent": "#4f6ef7",
@@ -62,7 +84,8 @@ log = logging.getLogger("config")
 
 def ensure_dirs() -> None:
     """创建所有数据/日志目录（幂等）。"""
-    for d in (DATA_DIR, MODELS_DIR, MEDIA_DIR, SUBTITLES_DIR, EXPORTS_DIR, LOGS_DIR):
+    for d in (DATA_DIR, MODELS_DIR, MEDIA_DIR, SUBTITLES_DIR, EXPORTS_DIR,
+              LOGS_DIR, UPDATE_DIR, UPDATE_STAGING_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -105,12 +128,14 @@ def save_settings(settings: dict[str, Any]) -> None:
 
 
 def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    """设置归一化：v1.6.0 起仅允许 large-v3 模型，其它模型强制回退。"""
+    """设置归一化：模型白名单 + 在线更新开关类型。"""
     if settings.get("model") not in ALLOWED_MODELS:
         old = settings.get("model")
         settings["model"] = DEFAULT_MODEL
         if old and old != DEFAULT_MODEL:
             log.warning("模型 %s 已弃用，强制回退为 %s", old, DEFAULT_MODEL)
+    for key in ("update_auto_check", "update_use_mirror"):
+        settings[key] = bool(settings.get(key, True))
     return settings
 
 

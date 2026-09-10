@@ -189,6 +189,21 @@
       <pre id="logView" class="logview" hidden></pre>
       <p class="muted small">服务端 / 前端 / 启动器所有日志统一写入软件根目录 <b>logs</b> 文件夹（logs\app.log、logs\launcher.log），便于排查与定位问题。前端出现未捕获错误时也会自动上报到日志。</p>
     </div>
+    <div class="panel">
+      <h3>在线更新</h3>
+      <div id="updateInfo" class="engine-info">当前版本 v1.7.0；点击「检查更新」获取最新版本。</div>
+      <div class="form-grid">
+        <label class="wide"><input type="checkbox" id="setAutoUpdate"> 启动后自动检查更新（只检查，不自动安装）</label>
+        <label class="wide"><input type="checkbox" id="setUpdateMirror"> 直连 GitHub 失败时使用国内镜像加速下载</label>
+      </div>
+      <div class="add-row">
+        <button class="btn btn-sm btn-primary" id="btnCheckUpdate">检查更新</button>
+        <button class="btn btn-sm" id="btnDownloadUpdate" hidden>下载更新</button>
+        <button class="btn btn-sm btn-danger" id="btnApplyUpdate" hidden>安装并重启</button>
+      </div>
+      <pre id="updateNotes" class="logview" hidden></pre>
+      <p class="muted small">更新包只覆盖 <b>app/</b> 目录，不碰 data、logs、模型、视频和 exe。安装时软件会退出，由更新辅助脚本覆盖文件并自动重启。</p>
+    </div>
   </section>
 </main>
 

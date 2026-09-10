@@ -1,6 +1,8 @@
 # 口播违禁词检测
 
-> **当前版本：v1.6.0**（版本号见 `app/core/config.py` 的 `APP_VERSION`，界面顶栏同步显示；每次功能/修复发布递增）
+> **当前版本：v1.7.0**（版本号见 `app/core/config.py` 的 `APP_VERSION`，界面顶栏同步显示；每次功能/修复发布递增）
+
+> **在线更新（v1.7.0）**：设置页新增「在线更新」面板。更新包只覆盖 `app/` 目录，不碰 `data/`、`logs/`、模型、视频和 exe；下载后校验 SHA256，退出软件后自动覆盖并重启。更新清单见仓库根目录 `latest.json`，更新包发布到 GitHub Releases。
 
 > **绿色便捷版（v1.4.0）**：软件包仅约 150MB——whisper 模型与 NVIDIA CUDA 运行库全部改为**首次启动自动下载**（国内高速源：模型走 ModelScope，CUDA 库走清华/阿里/腾讯 PyPI 镜像；断点续传 + 文件清单 + 大小/SHA256 校验，保证完整不遗漏）。AMD/Intel 机器首次启动只需下载模型，NVIDIA 机器额外自动补 CUDA 库后启用 GPU 加速。
 
@@ -21,6 +23,7 @@
 - **一键去除违禁词**：在命中列表勾选要去除的词 → ffmpeg 精确剪掉对应音画片段（仅 mp4）→ 自动备份原文件到同目录 → 成品文件名保持不变、参数保持一致
 - **词库管理**：内置 4 分类 88 词种子库（广告法极限词/医疗功效/金融风险/平台违禁），支持增删改、批量导入、启停用；改词库后一键重新检索（无需重新转写）
 - **报告导出**：Excel 明细报告、SRT 字幕文件
+- **在线更新**：GitHub Releases + `latest.json` 清单；检查/下载 app 小包 + SHA256 校验 + 退出后自动覆盖 `app/` 并重启；设置页可开关自动检查和国内镜像
 - **界面**：浅色/深色双主题（跟随系统 + 手动切换 + 记忆）、简约动画、新手引导、悬浮提示
 - **稳定性**：单视频失败不影响整批、失败重试、服务重启后任务自动恢复、设置损坏自动回退、最低配置门槛检查
 
@@ -51,6 +54,7 @@
 │   │   ├── media.py          #   ffmpeg/时长探测/回收站删除
 │   │   ├── exporter.py       #   Excel 报告导出
 │   │   ├── model_downloader.py  # 多源竞速下载 + 断点续传
+│   │   ├── updater.py        #   在线更新（检查/下载/SHA256/覆盖 app/）
 │   │   └── syscheck.py       #   显卡识别 + 最低配置门槛
 │   ├── server/
 │   │   ├── api.py            #   FastAPI 路由
@@ -61,12 +65,14 @@
 │   ├── app.db                #   SQLite 数据库
 │   ├── settings.json         #   设置
 │   ├── models/local/         #   whisper 模型（首启自动下载）
+│   ├── updates/              #   在线更新 pending/下载包/辅助脚本
 │   ├── subtitles/            #   导出的 SRT
 │   ├── media/                #   网页上传的视频落地
-│   ├── exports/              #   Excel 报告
-│   └── app.log               #   运行日志
+│   └── exports/              #   Excel 报告
+├── logs/                     # 运行日志（app.log / launcher.log）
+├── latest.json               # 在线更新清单（GitHub main 分支）
 ├── tests/                    # 测试与工具脚本
-├── scripts/                  # 构建/打包脚本
+├── scripts/                  # 构建/打包/发布脚本
 ├── tools/Launcher.cs         # C# 桌面启动器源码
 ├── lib/webview2/             # WebView2 依赖（fetch_webview2 拉取）
 ├── docs/                     # 开发文档与日志
@@ -97,9 +103,12 @@
 .venv\Scripts\python.exe tests\test_detector.py      # 检测器逻辑测试
 .venv\Scripts\python.exe tests\test_split_segments.py # 字幕切分测试
 .venv\Scripts\python.exe tests\test_cutter.py        # ffmpeg 去词切割测试
+.venv\Scripts\python.exe tests\test_updater.py       # 在线更新（本地 HTTP，不联网）
 .venv\Scripts\python.exe tests\e2e_test.py           # 端到端（需服务运行 + 模型）
 ```
 
 打包发布：`powershell -File scripts\pack_full.ps1`（生成绿色免安装包，模型首启自动下载）。
+
+在线更新发布：`powershell -File scripts\publish_update.ps1 -Version 1.8.0 -Notes "更新说明" -Publish`（需要本机 `gh` 已登录）。
 
 开发文档见 `docs/开发文档.md`，过程记录见 `docs/开发日志.md`。

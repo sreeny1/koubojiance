@@ -1,0 +1,13 @@
+{
+    "version":  "1.7.0",
+    "published_at":  "2026-09-10T21:38:41+08:00",
+    "notes":  "Add online update",
+    "assets":  {
+                   "app":  {
+                               "name":  "koubo-app-v1.7.0.zip",
+                               "url":  "https://github.com/smeeny1/koubojiance/releases/download/v1.7.0/koubo-app-v1.7.0.zip",
+                               "size":  173350,
+                               "sha256":  "e2efa04e40dceae1e23b9f59616dd7f59be5b18fd5d2fc7dd54b3c51bce4680b"
+                           }
+               }
+}

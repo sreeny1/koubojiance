@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from core import config
+from core import config, updater
 from core.database import get_db
 from core.exporter import export_hits
 from server.cut_tasks import get_cut_manager
@@ -530,6 +530,75 @@ def status():
 
 
 # ----------------------------------------------------------------------
+# 在线更新
+# ----------------------------------------------------------------------
+@router.get("/update/check")
+def update_check():
+    """检查 GitHub 上的 latest.json 是否有新版本。"""
+    return updater.check_for_update()
+
+
+@router.get("/update/status")
+def update_status():
+    """返回当前更新状态：待安装版本 / 上次安装结果 / 当前版本。"""
+    pending = updater.load_pending()
+    applied = None
+    try:
+        if config.UPDATE_APPLIED_PATH.exists():
+            import json
+
+            applied = json.loads(config.UPDATE_APPLIED_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        applied = None
+    return {
+        "current_version": config.APP_VERSION,
+        "pending": pending,
+        "applied": applied,
+        "update_dir": str(config.UPDATE_DIR),
+        "helper": str(config.UPDATE_HELPER_PATH),
+    }
+
+
+@router.post("/update/download")
+def update_download():
+    """检查并下载最新 app/ 更新包，写入 pending.json。"""
+    result = updater.check_for_update()
+    if result.get("error"):
+        raise HTTPException(502, f"检查更新失败：{result['error']}")
+    if not result.get("update_available"):
+        return {"ok": True, "update_available": False, "message": "当前已是最新版本"}
+    asset = result.get("asset") or {}
+    try:
+        pending = updater.stage_update(asset, result["latest_version"])
+    except Exception as e:  # noqa: BLE001
+        log.exception("下载更新失败")
+        raise HTTPException(500, f"下载更新失败：{e}") from e
+    return {
+        "ok": True,
+        "update_available": True,
+        "version": result["latest_version"],
+        "notes": result.get("notes") or "",
+        "pending": pending,
+        "message": "更新包已下载并校验，重启软件后安装",
+    }
+
+
+@router.post("/update/apply")
+def update_apply():
+    """写入辅助脚本并让服务退出；辅助脚本会在退出后覆盖 app/ 并重启软件。"""
+    pending = updater.load_pending()
+    if not pending:
+        raise HTTPException(409, "没有已下载的更新，请先检查并下载更新")
+    try:
+        updater.launch_apply_helper()
+    except Exception as e:  # noqa: BLE001
+        log.exception("启动更新辅助脚本失败")
+        raise HTTPException(500, f"启动更新失败：{e}") from e
+    _schedule_shutdown(1.2)
+    return {"ok": True, "message": "正在退出并安装更新，软件会自动重启"}
+
+
+# ----------------------------------------------------------------------
 # 日志与排障（前端错误上报 / 查看日志 / 打开日志目录）
 # ----------------------------------------------------------------------
 _LOGGER_LEVELS = {
@@ -590,19 +659,17 @@ def open_logs_dir():
         raise HTTPException(500, f"打开日志目录失败：{e}") from e
 
 
-@router.post("/shutdown")
-def shutdown():
-    """本地服务优雅退出（供启动器托盘退出调用）。
+def _schedule_shutdown(delay: float = 0.4) -> None:
+    """延迟优雅关停：停止队列/数据库，然后结束进程。
 
-    只接受 127.0.0.1 本机访问（uvicorn 已绑定 loopback）。
-    流程：停止任务队列/工作线程 → 清理 → 结束进程；
-    由启动器配合进程树强杀做双保险，确保零残留。
+    在线更新辅助脚本会等待进程退出后再覆盖 app/ 并重启，因此这里保持
+    os._exit(0)，让 Windows 释放文件句柄。
     """
     import os
     import time
 
     def _graceful_stop() -> None:
-        time.sleep(0.4)  # 让响应先返回给调用方
+        time.sleep(delay)  # 让 HTTP 响应先返回给调用方
         try:
             get_manager().shutdown()  # 停转写 worker 线程（最多等 3s）
         except Exception:  # noqa: BLE001
@@ -615,9 +682,15 @@ def shutdown():
             get_db().close()
         except Exception:  # noqa: BLE001
             pass
-        os._exit(0)  # normal 结束可释放句柄；ffmpeg 子进程由启动器树杀兜底
+        os._exit(0)
 
     threading.Thread(target=_graceful_stop, daemon=True).start()
+
+
+@router.post("/shutdown")
+def shutdown():
+    """本地服务优雅退出（供启动器托盘退出 / 在线更新重启调用）。"""
+    _schedule_shutdown(0.4)
     return {"ok": True}
 
 

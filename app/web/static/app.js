@@ -177,6 +177,7 @@ const state = {
   activeCut: null,          // 进行中的去词任务 {videoId, jobId}
   modelReady: null,         // 识别模型是否就绪（首启下载拦截依据）
   availableModels: [],      // 本地已下载的模型名（设置页标注"已下载"）
+  updateInfo: null,         // 最近一次检查到的在线更新信息
 };
 
 /* ========================= 页签切换 ========================= */
@@ -966,8 +967,11 @@ async function loadSettings() {
   $("#setTheme").value = s.theme || "system";
   $("#setHfEndpoint").value = s.hf_endpoint || "";
   $("#setLogDebug").checked = s.log_level === "debug";
+  $("#setAutoUpdate").checked = s.update_auto_check !== false;
+  $("#setUpdateMirror").checked = s.update_use_mirror !== false;
   $("#logDirPath").textContent = s.log_dir || "";
   if (s.theme) applyTheme(s.theme);  // 以服务端设置为准（首次打开无 localStorage 时也正确）
+  refreshUpdateStatus();
 
   // 标注本地已下载的模型，避免用户以为切换模型都要重新下载
   const avail = state.availableModels || [];
@@ -990,6 +994,8 @@ $("#btnSaveSettings").addEventListener("click", async () => {
     theme: $("#setTheme").value,
     hf_endpoint: $("#setHfEndpoint").value.trim(),
     log_level: $("#setLogDebug").checked ? "debug" : "info",
+    update_auto_check: $("#setAutoUpdate").checked,
+    update_use_mirror: $("#setUpdateMirror").checked,
   };
   try {
     await api("POST", "/api/settings", payload);
@@ -1014,6 +1020,104 @@ $("#btnOpenLogDir").addEventListener("click", async () => {
     toast("已打开日志目录：" + (d.path || ""));
   } catch (e) { toast(e.message, true); }
 });
+
+/* ========================= 在线更新 ========================= */
+async function refreshUpdateStatus() {
+  try {
+    const s = await api("GET", "/api/update/status");
+    if (s.pending) {
+      $("#updateInfo").innerHTML =
+        `已下载更新 <b>v${esc(s.pending.version)}</b>，点击「安装并重启」生效。`;
+      $("#btnDownloadUpdate").hidden = true;
+      $("#btnApplyUpdate").hidden = false;
+    } else if (!state.updateInfo) {
+      $("#updateInfo").textContent =
+        `当前版本 v${s.current_version || ""}；点击「检查更新」获取最新版本。`;
+    }
+  } catch (_) {}
+}
+
+async function checkUpdate(manual) {
+  const info = $("#updateInfo");
+  const notes = $("#updateNotes");
+  info.textContent = "正在检查更新…";
+  $("#btnDownloadUpdate").hidden = true;
+  $("#btnApplyUpdate").hidden = true;
+  try {
+    const r = await api("GET", "/api/update/check");
+    state.updateInfo = r;
+    if (r.error) {
+      info.textContent = `检查更新失败：${r.error}`;
+      notes.hidden = true;
+      if (manual) toast("检查更新失败：" + r.error, true);
+      return;
+    }
+    if (r.update_available) {
+      info.innerHTML =
+        `发现新版本 <b>v${esc(r.latest_version)}</b>（当前 v${esc(r.current_version)}）`;
+      notes.textContent = r.notes || "暂无更新说明";
+      notes.hidden = !r.notes;
+      $("#btnDownloadUpdate").hidden = false;
+      toast("发现新版本 v" + r.latest_version);
+    } else {
+      info.textContent = `当前已是最新版本 v${esc(r.current_version)}`;
+      notes.hidden = true;
+      if (manual) toast("当前已是最新版本");
+    }
+  } catch (e) {
+    info.textContent = "检查更新失败：" + e.message;
+    if (manual) toast(e.message, true);
+  }
+}
+
+async function downloadUpdate() {
+  const btn = $("#btnDownloadUpdate");
+  const info = $("#updateInfo");
+  btn.disabled = true;
+  info.textContent = "正在下载并校验更新包…";
+  try {
+    const r = await api("POST", "/api/update/download");
+    if (!r.update_available) {
+      info.textContent = `当前已是最新版本 v${esc(r.current_version || "")}`;
+      btn.hidden = true;
+      return;
+    }
+    info.innerHTML =
+      `更新包 <b>v${esc(r.version)}</b> 已下载并校验，点击「安装并重启」生效。`;
+    btn.hidden = true;
+    $("#btnApplyUpdate").hidden = false;
+    toast("更新包下载完成");
+  } catch (e) {
+    info.textContent = "下载更新失败：" + e.message;
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function applyUpdate() {
+  if (!confirm("即将退出软件并安装更新，安装完成后会自动重启。是否继续？")) return;
+  const info = $("#updateInfo");
+  info.textContent = "正在退出并安装更新，软件会自动重启…";
+  try {
+    await api("POST", "/api/update/apply");
+    toast("正在安装更新，软件将自动重启");
+  } catch (e) {
+    info.textContent = "安装更新失败：" + e.message;
+    toast(e.message, true);
+  }
+}
+
+async function maybeAutoCheckUpdate() {
+  try {
+    const s = await api("GET", "/api/settings");
+    if (s.update_auto_check !== false) await checkUpdate(false);
+  } catch (_) {}
+}
+
+$("#btnCheckUpdate").addEventListener("click", () => checkUpdate(true));
+$("#btnDownloadUpdate").addEventListener("click", downloadUpdate);
+$("#btnApplyUpdate").addEventListener("click", applyUpdate);
 
 async function refreshStatus() {
   try {
@@ -1149,5 +1253,6 @@ $("#welcomeModal").addEventListener("click", (e) => {
   schedulePoll();
   scheduleTaskPoll();
   maybeShowWelcome();
+  maybeAutoCheckUpdate();
   clientLog("info", "前端页面初始化完成");
 })();
