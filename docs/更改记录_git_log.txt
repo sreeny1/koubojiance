@@ -1,3 +1,5 @@
+e2cb482 2026-09-10 feat(release): v1.7.0 发布完整绿色包与 app 更新包，latest.json 支持 full/app 双资产
+35ca063 2026-09-10 docs: 导出git变更记录(v1.7.0)
 25741a9 2026-09-10 feat(update): 在线更新机制——GitHub latest.json + app小包+SHA256+退出后覆盖重启；设置页更新面板 (v1.7.0)
 278ea36 2026-09-07 docs: 导出git变更记录(v1.6.0)
 57838d6 2026-09-07 feat(model): 仅保留large-v3，其它模型弃用——界面/后端白名单/下载器三处锁定，旧配置强制回退 (v1.6.0)
