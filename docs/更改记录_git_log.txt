@@ -1,3 +1,5 @@
+0ca85df 2026-09-10 fix(update): 修正 GitHub 仓库为 sreeny1/koubojiance，重建 v1.7.0 发布资产与 latest.json
+7867a93 2026-09-10 docs: 导出git变更记录(v1.7.0 完整发布)
 e2cb482 2026-09-10 feat(release): v1.7.0 发布完整绿色包与 app 更新包，latest.json 支持 full/app 双资产
 35ca063 2026-09-10 docs: 导出git变更记录(v1.7.0)
 25741a9 2026-09-10 feat(update): 在线更新机制——GitHub latest.json + app小包+SHA256+退出后覆盖重启；设置页更新面板 (v1.7.0)
