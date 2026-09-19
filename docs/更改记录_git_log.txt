@@ -1,3 +1,8 @@
+b860171 2026-09-19 fix(v1.8.0): 代码审查修复 + OTA 改为仓库直链云更新；app小包入 updates/，生成完整分发包
+f9d869d 2026-09-19 feat(v1.8.0): 转写与去词双核心优化——统一预抽16k音轨/VAD放宽/词级时间戳；去词产物时长校验不再假成功
+64f792b 2026-09-10 chore: 添加 Git 凭据一次性授权脚本（绕过 api.github.com 限制）
+9c733db 2026-09-10 chore: 添加一次性 GitHub CLI 授权脚本，用于后续自动推送与发版
+90cb256 2026-09-10 docs: 导出git变更记录(v1.7.0 仓库修正)
 0ca85df 2026-09-10 fix(update): 修正 GitHub 仓库为 sreeny1/koubojiance，重建 v1.7.0 发布资产与 latest.json
 7867a93 2026-09-10 docs: 导出git变更记录(v1.7.0 完整发布)
 e2cb482 2026-09-10 feat(release): v1.7.0 发布完整绿色包与 app 更新包，latest.json 支持 full/app 双资产
