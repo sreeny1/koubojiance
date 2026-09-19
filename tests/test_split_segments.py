@@ -82,5 +82,27 @@ assert fixed5[-1] == mixed[-1], "结尾正常段被改"
 assert len(fixed5) > 3, "中间超长段未切分"
 print(f"用例5 混合场景: OK（{len(fixed5)} 段，正常段原样保留）")
 
+# 用例6：词级时间戳——切分后子句时间取词时间、词正确归属子句
+wseg = [{
+    "start": 0.0, "end": 12.0,
+    "text": "这是第一句话，这是第二句话。",
+    "words": [
+        {"cs": 0, "ce": 6, "s": 0.5, "e": 2.9},     # 这是第一句话，
+        {"cs": 7, "ce": 13, "s": 3.5, "e": 5.8},    # 这是第二句话。
+    ],
+}]
+fixed6 = split_oversized_segments(wseg)
+print("用例6 词级时间切分:")
+for s in fixed6:
+    print(f"  [{s['start']:5.2f} - {s['end']:5.2f}] {s['text']}  words={s['words']}")
+assert len(fixed6) == 2, "词级用例未按句切分"
+assert abs(fixed6[0]["start"] - 0.5) < 0.01 and abs(fixed6[0]["end"] - 2.9) < 0.01, \
+    "第一子句时间未取词级时间"
+assert abs(fixed6[1]["start"] - 3.5) < 0.01 and abs(fixed6[1]["end"] - 5.8) < 0.01, \
+    "第二子句时间未取词级时间"
+assert fixed6[0]["words"] and fixed6[0]["words"][0]["cs"] == 0, "词未归属到第一子句"
+assert fixed6[1]["words"] and fixed6[1]["words"][0]["cs"] == 0, "词未归属到第二子句（本地坐标）"
+print("  词级时间戳切分: OK")
+
 print()
 print("全部用例通过")

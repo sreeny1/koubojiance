@@ -132,6 +132,8 @@ class CutManager:
                  job_id, job["video_id"], video["filename"], len(ranges))
 
         tmp = src.with_name(src.stem + ".cut_tmp.mp4")
+        backup = None
+        replaced = False
         try:
             def on_p(frac: float) -> None:
                 self._progress[job_id] = frac
@@ -148,6 +150,7 @@ class CutManager:
                 raise RuntimeError("切割产物为空")
             # 覆盖原名（清只读 + 重试；被占用时给出明确提示，避免 WinError 5）
             replace_over_target(tmp, src)
+            replaced = True
             self._progress[job_id] = 1.0
             self._finish(job_id, "done", None)
             self._requeue_transcribe(job["video_id"])
@@ -161,6 +164,14 @@ class CutManager:
             self._finish(job_id, "canceled", "用户取消")
         except Exception as e:  # noqa: BLE001
             tmp.unlink(missing_ok=True)
+            # 原文件尚未被覆盖（replace 前失败）：本次备份没有存在意义，
+            # 自动清理，避免"目录里多出一份复制的视频"困扰用户
+            if not replaced and backup is not None:
+                try:
+                    backup.unlink(missing_ok=True)
+                    log.info("切割失败且原文件未改动，已清理本次备份: %s", backup)
+                except OSError:
+                    pass
             log.exception("去词任务 #%s 失败: %s", job_id, video["filename"])
             self._finish(job_id, "error", str(e)[:500])
         finally:

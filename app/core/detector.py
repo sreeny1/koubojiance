@@ -110,9 +110,14 @@ class Detector:
         return int(seg_start_ms + ratio * (seg_end_ms - seg_start_ms))
 
     def scan_text(
-        self, text: str, seg_start_ms: int, seg_end_ms: int, segment_id: int
+        self, text: str, seg_start_ms: int, seg_end_ms: int, segment_id: int,
+        words: list[dict] | None = None,
     ) -> list[dict[str, Any]]:
-        """扫描一条字幕文本，返回命中列表（未入库）。"""
+        """扫描一条字幕文本，返回命中列表（未入库）。
+
+        words 为该段的词级时间戳 [{cs,ce,s,e},...]（可选）：
+        提供时命中时间取覆盖词的精确时间（±0.2s）；否则回退线性内插。
+        """
         hits: list[dict[str, Any]] = []
         if not text or not self.words:
             return hits
@@ -144,7 +149,7 @@ class Detector:
                 end = start + len(wnorm)
                 self._add_hit(
                     hits, seen_spans, w, text, idx_map, norm, start, end,
-                    seg_start_ms, seg_end_ms, segment_id,
+                    seg_start_ms, seg_end_ms, segment_id, words,
                 )
                 start = norm.find(wnorm, start + 1)
 
@@ -163,14 +168,14 @@ class Detector:
                 n_end = n_start + len(wnorm)
                 self._add_hit(
                     hits, seen_spans, w, text, idx_map, norm, n_start, n_end,
-                    seg_start_ms, seg_end_ms, segment_id,
+                    seg_start_ms, seg_end_ms, segment_id, words,
                 )
 
         return hits
 
     def _add_hit(
         self, hits, seen, w, text, idx_map, norm, n_start, n_end,
-        seg_start_ms, seg_end_ms, segment_id,
+        seg_start_ms, seg_end_ms, segment_id, words=None,
     ) -> None:
         key = (w["id"], n_start, n_end)
         if key in seen:
@@ -183,6 +188,22 @@ class Detector:
         if o_end <= o_start:
             return
         seen.add(key)
+
+        # 命中时间：优先词级时间戳（whisper word_timestamps，±0.2s），
+        # 无词数据（旧库/对齐失败）回退字符线性内插（±1~3s）
+        start_ms = self._interp(seg_start_ms, seg_end_ms, o_start, len(text))
+        end_ms = self._interp(seg_start_ms, seg_end_ms, o_end - 1, len(text))
+        if words:
+            from .transcriber import words_in_range
+
+            covered = words_in_range(words, o_start, o_end)
+            if covered:
+                start_ms = int(covered[0]["s"] * 1000)
+                end_ms = int(covered[-1]["e"] * 1000)
+                # 词时间戳偶发越界（对齐抖动），夹回字幕段内保证单调
+                start_ms = max(seg_start_ms, min(start_ms, seg_end_ms))
+                end_ms = max(start_ms, min(end_ms, seg_end_ms))
+
         hits.append({
             "segment_id": segment_id,
             "word_id": w["id"],
@@ -190,8 +211,8 @@ class Detector:
             "matched_text": text[o_start:o_end],
             "char_start": o_start,
             "char_end": o_end,
-            "start_ms": self._interp(seg_start_ms, seg_end_ms, o_start, len(text)),
-            "end_ms": self._interp(seg_start_ms, seg_end_ms, o_end - 1, len(text)),
+            "start_ms": start_ms,
+            "end_ms": end_ms,
             "sentence": text,
             "category_id": w["category_id"],
             "category_name": w["category_name"],
@@ -201,13 +222,22 @@ class Detector:
     # ------------------------------------------------------------------
     def scan_video(self, video_id: int) -> int:
         """对单个视频的全部字幕重新检测（替换旧结果），返回命中数。"""
+        import json
+
         segments = self._db.query(
-            "SELECT id, start_ms, end_ms, text FROM segments "
+            "SELECT id, start_ms, end_ms, text, words FROM segments "
             "WHERE video_id=? ORDER BY idx", (video_id,)
         )
         rows = []
         for s in segments:
-            for h in self.scan_text(s["text"], s["start_ms"], s["end_ms"], s["id"]):
+            words = None
+            if s.get("words"):
+                try:
+                    words = json.loads(s["words"])
+                except (TypeError, ValueError):
+                    words = None
+            for h in self.scan_text(s["text"], s["start_ms"], s["end_ms"],
+                                    s["id"], words=words):
                 h.pop("char_start", None)
                 h.pop("char_end", None)
                 rows.append((

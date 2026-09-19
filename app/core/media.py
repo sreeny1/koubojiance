@@ -77,11 +77,14 @@ def has_audio_stream(path: str | Path) -> bool:
 def extract_audio_wav(src: str | Path, dst: str | Path) -> bool:
     """用 ffmpeg 抽取 16kHz 单声道 WAV。成功返回 True。
 
-    仅作为 PyAV 解不开特殊格式时的兜底手段。
+    作为统一转写预处理（whisper 最佳输入格式）：
+    - 下混 5.1/立体声 → 单声道；重采样到 whisper 的工作采样率 16kHz；
+    - aresample=async=1：按时间戳填充/丢弃样本，修复 VFR 音轨的漂移。
     """
     cmd = [
         get_ffmpeg(), "-y", "-i", str(src),
         "-vn", "-ac", "1", "-ar", "16000",
+        "-af", "aresample=async=1",
         "-acodec", "pcm_s16le", str(dst),
     ]
     log.info("ffmpeg 抽取音轨: %s → %s", src, dst)

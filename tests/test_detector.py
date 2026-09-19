@@ -44,5 +44,50 @@ for text, expected in cases:
         print(f"      期望包含: {exp_words}")
 
 print()
+
+# ---- 词级时间戳：命中时间应取词的精确时间而非线性内插 ----
+# 场景：60 秒段中"第一"出现在文本中段；线性内插会把时间估到 ~35s，
+# 而词级时间戳给出真实发音时间 12.0~12.8s
+seg_text = "今天给大家介绍一款产品" + " blah" * 20 + "，全网销量第一，值得关注。"
+seg_words = []
+pos = 0
+for token in ["今天给大家介绍一款产品"] + ["blah"] * 20 + ["，全网销量第一，值得关注。"]:
+    seg_words.append({"cs": pos, "ce": pos + len(token), "s": 10.0, "e": 60.0})
+    pos += len(token)
+# 目标词"第一"的字符区间：精确词时间覆盖内插时间
+target_cs = seg_text.find("第一")
+seg_words.append({
+    "cs": target_cs, "ce": target_cs + 2, "s": 12.0, "e": 12.8,
+})
+
+hits = det.scan_text(seg_text, 10_000, 60_000, segment_id=1, words=seg_words)
+hit_first = next((h for h in hits if h["word_text"] == "第一"), None)
+if hit_first:
+    got = (hit_first["start_ms"], hit_first["end_ms"])
+    print(f"[词级时间] '第一' 命中时间 {got[0]}~{got[1]}ms（词级真实 12000~12800ms）")
+    if 11_000 <= got[0] <= 13_000 and 12_000 <= got[1] <= 13_500:
+        print("[✓] 词级时间戳生效：命中时间取自词数据而非内插")
+    else:
+        all_ok = False
+        print("[✗] 词级时间戳未生效，命中时间疑似走了内插")
+else:
+    all_ok = False
+    print("[✗] 词级用例未命中'第一'")
+
+# 无词数据回退：同一文本不给 words，"第一"位于文本后部（~89% 处），
+# 内插时间应接近段尾（~55s+）——与词级时间 12s 相差 45s，
+# 正是"内插剪偏、词级时间戳修复"的直观对比
+hits2 = det.scan_text(seg_text, 10_000, 60_000, segment_id=2)
+hit2 = next((h for h in hits2 if h["word_text"] == "第一"), None)
+if hit2:
+    print(f"[回退内插] 无词数据时'第一'命中时间 {hit2['start_ms']}~{hit2['end_ms']}ms"
+          f"（预期 ~55000ms 附近，与词级 12000ms 相差 40s+ —— 内插误差示例）")
+    if 50_000 <= hit2["start_ms"] <= 60_000:
+        print("[✓] 无词数据正确回退线性内插（且凸显了内插的大误差）")
+    else:
+        all_ok = False
+        print("[✗] 回退内插时间异常")
+
+print()
 print("检测器测试 " + ("全部通过 ✓" if all_ok else "存在失败 ✗"))
 sys.exit(0 if all_ok else 1)

@@ -243,15 +243,19 @@ class TaskManager:
             duration_ms = (
                 int(segments[-1]["end"] * 1000) if segments else None
             )
+            import json as _json
+
             with self.db.tx() as conn:
                 conn.execute("DELETE FROM segments WHERE video_id=?", (video["id"],))
                 conn.execute("DELETE FROM hits WHERE video_id=?", (video["id"],))
                 conn.executemany(
-                    "INSERT INTO segments(video_id,idx,start_ms,end_ms,text) "
-                    "VALUES(?,?,?,?,?)",
+                    "INSERT INTO segments(video_id,idx,start_ms,end_ms,text,words) "
+                    "VALUES(?,?,?,?,?,?)",
                     [
                         (video["id"], i, int(s["start"] * 1000),
-                         int(s["end"] * 1000), s["text"])
+                         int(s["end"] * 1000), s["text"],
+                         _json.dumps(s["words"], ensure_ascii=False)
+                         if s.get("words") else None)
                         for i, s in enumerate(segments)
                     ],
                 )
@@ -394,11 +398,17 @@ class TaskManager:
         return self.detector.scan_all()
 
     def _repair_oversized_segments(self) -> None:
-        """把库中超长段切分回写（分钟级耗时，纯本地计算，不重新转写）。"""
+        """把库中超长段切分回写（分钟级耗时，纯本地计算，不重新转写）。
+
+        切分时保留/重算词级时间戳（words 字段），保证旧数据修复后
+        命中定位依然精确。
+        """
+        import json
+
         from core.transcriber import split_oversized_segments
 
         rows = self.db.query(
-            "SELECT video_id, idx, start_ms, end_ms, text FROM segments "
+            "SELECT video_id, idx, start_ms, end_ms, text, words FROM segments "
             "ORDER BY video_id, idx"
         )
         # 按视频分组找出含超长段的视频，只重写这些视频
@@ -407,22 +417,31 @@ class TaskManager:
             by_video.setdefault(r["video_id"], []).append(r)
 
         for vid, segs in by_video.items():
-            as_dicts = [
-                {"start": s["start_ms"] / 1000, "end": s["end_ms"] / 1000,
-                 "text": s["text"]}
-                for s in segs
-            ]
+            as_dicts = []
+            for s in segs:
+                words = None
+                if s.get("words"):
+                    try:
+                        words = json.loads(s["words"])
+                    except (TypeError, ValueError):
+                        words = None
+                as_dicts.append({
+                    "start": s["start_ms"] / 1000, "end": s["end_ms"] / 1000,
+                    "text": s["text"], "words": words,
+                })
             fixed = split_oversized_segments(as_dicts)
             if len(fixed) == len(as_dicts):
                 continue  # 无超长段，跳过
             with self.db.tx() as conn:
                 conn.execute("DELETE FROM segments WHERE video_id=?", (vid,))
                 conn.executemany(
-                    "INSERT INTO segments(video_id,idx,start_ms,end_ms,text) "
-                    "VALUES(?,?,?,?,?)",
+                    "INSERT INTO segments(video_id,idx,start_ms,end_ms,text,words) "
+                    "VALUES(?,?,?,?,?,?)",
                     [
                         (vid, i, int(s["start"] * 1000),
-                         int(s["end"] * 1000), s["text"])
+                         int(s["end"] * 1000), s["text"],
+                         json.dumps(s["words"], ensure_ascii=False)
+                         if s.get("words") else None)
                         for i, s in enumerate(fixed)
                     ],
                 )

@@ -19,7 +19,7 @@ from .config import DB_PATH
 
 log = logging.getLogger("database")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS segments (
     idx INTEGER NOT NULL,               -- 段序号
     start_ms INTEGER NOT NULL,
     end_ms INTEGER NOT NULL,
-    text TEXT NOT NULL
+    text TEXT NOT NULL,
+    words TEXT                          -- 词级时间戳 JSON：[{cs,ce,s,e},...]（cs/ce=字符区间，s/e=秒）
 );
 CREATE INDEX IF NOT EXISTS idx_segments_video ON segments(video_id);
 CREATE TABLE IF NOT EXISTS categories (
@@ -174,6 +175,15 @@ class Database:
                 log.info("数据库迁移 v1→v2：videos.file_deleted 已添加")
         except Exception as e:  # noqa: BLE001
             log.warning("数据库迁移 file_deleted 失败（忽略）: %s", e)
+        # v2 → v3：segments 增加 words（词级时间戳 JSON，供违禁词命中精确定位）
+        try:
+            cols = {r["name"] for r in self._conn.execute(
+                "PRAGMA table_info(segments)").fetchall()}
+            if "words" not in cols:
+                self._conn.execute("ALTER TABLE segments ADD COLUMN words TEXT")
+                log.info("数据库迁移 v2→v3：segments.words 已添加")
+        except Exception as e:  # noqa: BLE001
+            log.warning("数据库迁移 segments.words 失败（忽略）: %s", e)
 
     def _seed_words(self) -> None:
         """首次建库时写入种子违禁词（词库为空才写，避免覆盖用户数据）。"""

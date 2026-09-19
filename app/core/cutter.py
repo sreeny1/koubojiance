@@ -110,7 +110,11 @@ def merge_ranges(ranges: list[tuple[float, float]], gap: float = 0.0) -> list[tu
 
 
 def hits_to_remove_ranges(hits: list[dict], pad: float = 0.3) -> list[tuple[float, float]]:
-    """把命中列表（含 start_ms/end_ms）转成要去除的秒级区间（前后加缓冲）。"""
+    """把命中列表（含 start_ms/end_ms）转成要去除的秒级区间（前后加缓冲）。
+
+    每个区间保证最短 0.2s：命中时间戳插值为零长（词在段首且单字）时，
+    pad=0 的调用也不会产出无效区间（trim 同点无效果，等于没剪）。
+    """
     pad = max(0.0, float(pad))
     ranges = []
     for h in hits:
@@ -118,6 +122,8 @@ def hits_to_remove_ranges(hits: list[dict], pad: float = 0.3) -> list[tuple[floa
         t1 = float(h["end_ms"]) / 1000 + pad
         if t0 < 0:
             t0 = 0.0
+        if t1 - t0 < 0.2:
+            t1 = t0 + 0.2
         ranges.append((t0, t1))
     return merge_ranges(ranges)
 
@@ -223,8 +229,11 @@ def cut_remove_ranges(
         cmd += ["-c:v", enc, "-preset", "veryfast", "-crf", "20"]
     if info.get("pix_fmt"):
         cmd += ["-pix_fmt", str(info["pix_fmt"])]
-    if info.get("fps"):
-        cmd += ["-r", f"{info['fps']:.6f}".rstrip("0").rstrip(".")]
+    # 输出帧率：仅在探测值合理（1~300fps）时固定，防止个别容器把
+    # average_rate 探成 1000fps 之类异常值导致产物时长/帧数错乱
+    fps = info.get("fps")
+    if fps and 1 < fps < 300:
+        cmd += ["-r", f"{fps:.6f}".rstrip("0").rstrip(".")]
 
     # 音频：aac 匹配原参数（无音频则跳过）
     if info["has_audio"]:
@@ -289,6 +298,27 @@ def cut_remove_ranges(
 
     if not dst.is_file() or dst.stat().st_size == 0:
         raise RuntimeError("ffmpeg 切割产物为空（可能所有区间均被去除）")
+
+    # ---- 产物时长校验：ffmpeg 退出码 0 ≠ 剪辑生效 ----
+    # 极端情况下（filter 未按预期工作/时间基异常）会产出与原片几乎等长的
+    # "复制件"，直接覆盖原文件等于没剪。校验：产物时长 ≈ 原时长 - 去除总时长，
+    # 偏差超过 1.5s 即判失败，绝不覆盖原文件。
+    from .media import probe_duration_ms
+
+    out_dur_ms = probe_duration_ms(dst)
+    if total > 0 and out_dur_ms:
+        total_remove = sum(t1 - t0 for t0, t1 in ranges)
+        expected_sec = total - total_remove
+        if abs(out_dur_ms / 1000 - expected_sec) > 1.5:
+            dst.unlink(missing_ok=True)
+            log.error("切割产物时长校验失败: 预期约 %.2fs，实际 %.2fs"
+                      "（原 %.2fs，去除 %.2fs）",
+                      expected_sec, out_dur_ms / 1000, total, total_remove)
+            raise RuntimeError(
+                f"切割产物时长异常（预期约 {expected_sec:.1f}s，"
+                f"实际 {out_dur_ms / 1000:.1f}s），已中止且未改动原文件。"
+                "请重试或反馈日志给开发者。"
+            )
 
     out_size = dst.stat().st_size
     if progress:
