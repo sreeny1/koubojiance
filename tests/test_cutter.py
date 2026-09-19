@@ -31,7 +31,9 @@ def test_hits_to_ranges() -> None:
     hits = [{"start_ms": 2000, "end_ms": 3000}, {"start_ms": 2800, "end_ms": 3500}]
     ranges = hits_to_remove_ranges(hits, pad=0.3)
     assert ranges == [(1.7, 3.8)]
-    print("[2] 命中转区间 OK")
+    tail = hits_to_remove_ranges([{"start_ms": 9500, "end_ms": 10000}], pad=0.3, duration=10.0)
+    assert tail and all(0.0 <= a < b <= 10.0 for a, b in tail), tail
+    print("[2] hits_to_ranges OK (tail clamped)")
 
 
 def test_cut() -> None:

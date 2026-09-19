@@ -8,14 +8,16 @@
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\publish_update.ps1 -Version 1.8.0 -Notes "fix xxx"
 #   powershell ... -Version 1.8.0 -Notes "fix xxx" -Full
-#   powershell ... -Version 1.8.0 -Notes "fix xxx" -Publish -Full
+#   powershell ... -Version 1.8.0 -Notes "fix xxx" -RepoHosted -Publish
+#   powershell ... -Version 1.8.0 -Notes "fix xxx" -Full -Publish
 #
 # ASCII-ONLY: PowerShell 5.1 on Chinese Windows parses BOM-less scripts as GBK.
 param(
     [Parameter(Mandatory=$true)][string]$Version,
     [string]$Notes = "Bug fixes and improvements.",
     [switch]$Publish,
-    [switch]$Full
+    [switch]$Full,
+    [switch]$RepoHosted
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,7 +59,16 @@ Update-FirstRegex (Join-Path $Root "README.md") 'v\d+\.\d+\.\d+' "v$Version"
 & (Join-Path $PSScriptRoot "make_app_update.ps1") -Root $Root -Version $Version
 $metaPath = Join-Path $Root "build\updates\app-update.json"
 $meta = Get-Content $metaPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$appUrl = "https://github.com/$repo/releases/download/v$Version/$($meta.name)"
+if ($RepoHosted) {
+    $updatesDir = Join-Path $Root "updates"
+    New-Item -ItemType Directory -Force -Path $updatesDir | Out-Null
+    Copy-Item ([string]$meta.path) (Join-Path $updatesDir ([string]$meta.name)) -Force
+}
+if ($RepoHosted) {
+    $appUrl = "https://raw.githubusercontent.com/$repo/main/updates/$($meta.name)"
+} else {
+    $appUrl = "https://github.com/$repo/releases/download/v$Version/$($meta.name)"
+}
 $assets = [ordered]@{
     app = [ordered]@{
         name = [string]$meta.name
@@ -79,13 +90,15 @@ if ($Full) {
     $fullHash = (Get-FileHash $fullZip -Algorithm SHA256).Hash.ToLower()
     $fullSize = (Get-Item $fullZip).Length
     $fullUrl = "https://github.com/$repo/releases/download/v$Version/$fullName"
-    $assets["full"] = [ordered]@{
-        name = $fullName
-        url = $fullUrl
-        size = [int64]$fullSize
-        sha256 = $fullHash
+    if (-not $RepoHosted) {
+        $assets["full"] = [ordered]@{
+            name = $fullName
+            url = $fullUrl
+            size = [int64]$fullSize
+            sha256 = $fullHash
+        }
+        $assetPaths += $fullZip
     }
-    $assetPaths += $fullZip
     Write-Host "FULL ZIP: $fullZip"
 }
 
@@ -114,6 +127,9 @@ if (-not $Publish) {
 Push-Location $Root
 try {
     & git add app/core/config.py tools/Launcher.cs README.md latest.json
+    if ($RepoHosted -and (Test-Path (Join-Path $Root "updates"))) {
+        & git add updates
+    }
     & git commit -m "release: v$Version"
     $commitOk = ($LASTEXITCODE -eq 0)
     if (-not $commitOk) { Write-Host "No commit created (maybe nothing changed); continuing." }
@@ -126,6 +142,11 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "git push origin main failed" }
     & git push origin $tag
     if ($LASTEXITCODE -ne 0) { throw "git push origin $tag failed" }
+
+    if ($RepoHosted) {
+        Write-Host "Git push done; repo-hosted OTA file is available from main."
+        exit 0
+    }
 
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     if (-not $gh) {

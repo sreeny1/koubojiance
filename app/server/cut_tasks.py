@@ -113,8 +113,11 @@ class CutManager:
             return
 
         pad = float(job["pad"] or 0.3)
-        ranges = hits_to_remove_ranges(hits, pad)
         duration_ms = probe_duration_ms(src)
+        ranges = hits_to_remove_ranges(
+            hits, pad,
+            duration=duration_ms / 1000 if duration_ms else None,
+        )
         if duration_ms:
             total_remove = sum(t1 - t0 for t0, t1 in ranges)
             if total_remove >= duration_ms / 1000 - 0.5:

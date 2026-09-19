@@ -444,13 +444,18 @@ class WhisperEngine:
                      Path(path).name, len(out), vad, time.monotonic() - t0)
             return out, float(info.duration or 0)
 
-        result, _dur = _run(vad=True)
+        result, run_dur = _run(vad=True)
+        if not duration and run_dur:
+            duration = int(run_dur * 1000)
 
         # 空结果兜底：VAD 可能把 BGM 大/音量低的整段口播全部过滤掉
         #（"整段转写不出来"的主要根因）→ 关闭 VAD 再试一次。
         if not result:
             log.warning("VAD 过滤后无任何字幕段，关闭 VAD 重试: %s", path)
-            result, _dur = _run(vad=False)
+            _had_duration = duration
+            result, run_dur = _run(vad=False)
+            if not _had_duration and run_dur:
+                duration = int(run_dur * 1000)
 
         if progress:
             progress(1.0)
@@ -491,10 +496,11 @@ def align_words(text: str, seg_words) -> list[dict] | None:
 
 
 def words_in_range(words: list[dict] | None, cs: int, ce: int) -> list[dict]:
-    """返回字符区间 [cs, ce) 覆盖到的词（按出现顺序）。"""
+    """返回字符区间 [cs, ce) 覆盖到的词（按字符先后排序）。"""
     if not words:
         return []
-    return [w for w in words if w["ce"] > cs and w["cs"] < ce]
+    hit = [w for w in words if w["ce"] > cs and w["cs"] < ce]
+    return sorted(hit, key=lambda w: w.get("cs", 0))
 
 
 # --------------------------------------------------------------------
@@ -544,8 +550,10 @@ def split_oversized_segments(segments: list[dict]) -> list[dict]:
                       for w in words if w["ce"] > s["cs"] and w["cs"] < s["ce"]]
                 if ws:
                     sub_words = ws
-                    sub_start = ws[0]["s"]
-                    sub_end = min(ws[-1]["e"], seg["end"])
+                    sub_start = max(seg["start"], min(float(ws[0]["s"]), seg["end"]))
+                    sub_end = min(seg["end"], float(ws[-1]["e"]))
+                    if sub_end <= sub_start:
+                        sub_end = sub_start + 0.01
             out.append({
                 "start": sub_start,
                 "end": max(sub_end, sub_start + 0.01),

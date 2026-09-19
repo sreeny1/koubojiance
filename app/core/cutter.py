@@ -109,22 +109,26 @@ def merge_ranges(ranges: list[tuple[float, float]], gap: float = 0.0) -> list[tu
     return out
 
 
-def hits_to_remove_ranges(hits: list[dict], pad: float = 0.3) -> list[tuple[float, float]]:
-    """把命中列表（含 start_ms/end_ms）转成要去除的秒级区间（前后加缓冲）。
-
-    每个区间保证最短 0.2s：命中时间戳插值为零长（词在段首且单字）时，
-    pad=0 的调用也不会产出无效区间（trim 同点无效果，等于没剪）。
-    """
+def hits_to_remove_ranges(hits, pad=0.3, duration=None):
+    """Convert hits to remove ranges; clamp to media duration if given."""
     pad = max(0.0, float(pad))
+    dur = float(duration) if duration and float(duration) > 0 else None
     ranges = []
     for h in hits:
         t0 = float(h["start_ms"]) / 1000 - pad
         t1 = float(h["end_ms"]) / 1000 + pad
         if t0 < 0:
             t0 = 0.0
+        if dur is not None:
+            t0 = min(t0, max(0.0, dur - 0.2))
+            t1 = min(t1, dur)
         if t1 - t0 < 0.2:
             t1 = t0 + 0.2
-        ranges.append((t0, t1))
+            if dur is not None and t1 > dur:
+                t1 = dur
+                t0 = max(0.0, dur - 0.2)
+        if t1 > t0:
+            ranges.append((t0, t1))
     return merge_ranges(ranges)
 
 
@@ -307,8 +311,11 @@ def cut_remove_ranges(
 
     out_dur_ms = probe_duration_ms(dst)
     if total > 0 and out_dur_ms:
-        total_remove = sum(t1 - t0 for t0, t1 in ranges)
-        expected_sec = total - total_remove
+        total_remove = sum(
+            max(0.0, min(total, t1) - max(0.0, t0))
+            for t0, t1 in ranges
+        )
+        expected_sec = max(0.0, total - total_remove)
         if abs(out_dur_ms / 1000 - expected_sec) > 1.5:
             dst.unlink(missing_ok=True)
             log.error("切割产物时长校验失败: 预期约 %.2fs，实际 %.2fs"

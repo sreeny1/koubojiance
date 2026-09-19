@@ -1,19 +1,13 @@
 {
-    "version":  "1.7.0",
-    "published_at":  "2026-09-10T22:22:17+08:00",
-    "notes":  "Add online update",
+    "version":  "1.8.0",
+    "published_at":  "2026-09-19T21:56:01+08:00",
+    "notes":  "v1.8.0: 转写准确性提升（统一16k音轨/VAD放宽/词级时间戳）与去词可靠性修复（产物时长校验，不再假成功）",
     "assets":  {
                    "app":  {
-                               "name":  "koubo-app-v1.7.0.zip",
-                               "url":  "https://github.com/sreeny1/koubojiance/releases/download/v1.7.0/koubo-app-v1.7.0.zip",
-                               "size":  173373,
-                               "sha256":  "c5e92821ad5169ac678580633785a10c0c5583263c3533225450bfe66502925c"
-                           },
-                   "full":  {
-                                "name":  "koubo-portable-v1.7.0.zip",
-                                "url":  "https://github.com/sreeny1/koubojiance/releases/download/v1.7.0/koubo-portable-v1.7.0.zip",
-                                "size":  156380208,
-                                "sha256":  "04c07b2d8147f334e09858a0f255ba9d53704bdefe319249427d3f610b498dde"
-                            }
+                               "name":  "koubo-app-v1.8.0.zip",
+                               "url":  "https://raw.githubusercontent.com/sreeny1/koubojiance/main/updates/koubo-app-v1.8.0.zip",
+                               "size":  177550,
+                               "sha256":  "82d6dc8529ebb64b9ec53d5e88bcb4a209e8e193a649bc1ef046c40cf4cc3071"
+                           }
                }
 }

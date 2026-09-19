@@ -81,8 +81,14 @@ def extract_audio_wav(src: str | Path, dst: str | Path) -> bool:
     - 下混 5.1/立体声 → 单声道；重采样到 whisper 的工作采样率 16kHz；
     - aresample=async=1：按时间戳填充/丢弃样本，修复 VFR 音轨的漂移。
     """
+    try:
+        ffmpeg = get_ffmpeg()
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("ffmpeg 不可用，无法抽取音轨: %s", e)
+        return False
     cmd = [
-        get_ffmpeg(), "-y", "-i", str(src),
+        ffmpeg, "-y", "-i", str(src),
         "-vn", "-ac", "1", "-ar", "16000",
         "-af", "aresample=async=1",
         "-acodec", "pcm_s16le", str(dst),
