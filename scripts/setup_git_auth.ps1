@@ -36,8 +36,12 @@ try {
 
     Write-Host "Testing git authentication (no remote changes)..."
     $env:GIT_TERMINAL_PROMPT = "0"
-    & git -C $Root push --dry-run origin main 2>&1 | ForEach-Object { $_ }
-    if ($LASTEXITCODE -ne 0) { throw "git push authentication test failed" }
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    & git -C $Root push --dry-run origin main 2>$null | Out-Null
+    $pushCode = $LASTEXITCODE
+    $ErrorActionPreference = $oldEap
+    if ($pushCode -ne 0) { throw "git push authentication test failed" }
 } finally {
     if ($bstr -ne [IntPtr]::Zero) {
         [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
