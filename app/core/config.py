@@ -28,7 +28,7 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 
 # ---- 应用版本（每次发布更新此号；界面/日志/状态接口统一读取）----
 APP_NAME = "口播违禁词检测"
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.8.1"
 
 # ---- 在线更新 ----
 # 仓库地址固定；latest.json 放 main 分支根目录，更新包放 GitHub Releases。

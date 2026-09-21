@@ -1,13 +1,13 @@
 {
-    "version":  "1.8.0",
-    "published_at":  "2026-09-19T21:56:01+08:00",
-    "notes":  "v1.8.0: 转写准确性提升（统一16k音轨/VAD放宽/词级时间戳）与去词可靠性修复（产物时长校验，不再假成功）",
+    "version":  "1.8.1",
+    "published_at":  "2026-09-21T14:49:30+08:00",
+    "notes":  "v1.8.1: 命中卡片展示完整字幕，违禁词行内高亮标注；命中明细可折叠勾选去除",
     "assets":  {
                    "app":  {
-                               "name":  "koubo-app-v1.8.0.zip",
-                               "url":  "https://raw.githubusercontent.com/sreeny1/koubojiance/main/updates/koubo-app-v1.8.0.zip",
-                               "size":  177550,
-                               "sha256":  "82d6dc8529ebb64b9ec53d5e88bcb4a209e8e193a649bc1ef046c40cf4cc3071"
+                               "name":  "koubo-app-v1.8.1.zip",
+                               "url":  "https://raw.githubusercontent.com/sreeny1/koubojiance/main/updates/koubo-app-v1.8.1.zip",
+                               "size":  178427,
+                               "sha256":  "a104b54cd17e1a2e856a5fb264fdf1f567c31993f830c6986738ef90957beaa6"
                            }
                }
 }

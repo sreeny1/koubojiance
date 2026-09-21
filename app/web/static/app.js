@@ -167,6 +167,39 @@ function markSentence(sentence, matched) {
     `<mark>${esc(matched)}</mark>` + esc(sentence.slice(i + matched.length));
 }
 
+function markHitsInSentence(sentence, hits) {
+  if (!hits || !hits.length) return esc(sentence);
+  const ranges = [];
+  hits.forEach((h) => {
+    const matched = h.matched_text || h.word_text || "";
+    if (!matched) return;
+    let from = 0;
+    while (from <= sentence.length - matched.length) {
+      const i = sentence.indexOf(matched, from);
+      if (i < 0) break;
+      ranges.push({ s: i, e: i + matched.length, color: h.color || "#e53935",
+                    word: h.word_text || matched, ms: h.start_ms || 0 });
+      from = i + Math.max(1, matched.length);
+    }
+  });
+  if (!ranges.length) return esc(sentence);
+  ranges.sort((a, b) => a.s - b.s || (b.e - b.s) - (a.e - a.s));
+  const clean = [];
+  let lastEnd = -1;
+  for (const r of ranges) {
+    if (r.s >= lastEnd) { clean.push(r); lastEnd = r.e; }
+  }
+  let html = "", pos = 0;
+  for (const r of clean) {
+    html += esc(sentence.slice(pos, r.s));
+    html += `<mark class="hit-mark" data-ms="${r.ms}" title="违禁词：${esc(r.word)}" ` +
+      `style="background:${esc(r.color)}33;color:${esc(r.color)}">${esc(sentence.slice(r.s, r.e))}</mark>`;
+    pos = r.e;
+  }
+  html += esc(sentence.slice(pos));
+  return html;
+}
+
 /* ========================= 全局状态 ========================= */
 const state = {
   results: null,
@@ -353,16 +386,29 @@ function renderVideoList(videos) {
         <div class="subs-slot" data-subs-for="${v.id}"><div class="subs-loading muted small">加载字幕…</div></div>
       </div>`;
     } else {
-      body = `<table class="hit-table">
-        <thead><tr><th style="width:36px"><input type="checkbox" class="hit-check-all" data-vid="${v.id}" title="全选/取消全选"></th><th style="width:110px">时间点</th><th style="width:130px">违禁词</th><th>口播内容</th></tr></thead>
-        <tbody>${v.hits.map((h, i) => `
-          <tr class="clickable" data-vid="${v.id}" data-hidx="${i}">
-            <td><input type="checkbox" class="hit-check" data-vid="${v.id}" data-hid="${h.id}" ${state.cutSelection.has(h.id) ? "checked" : ""}></td>
-            <td><span class="time-link">▶ ${fmtTimeFine(h.start_ms)}</span></td>
-            <td><span class="word-tag" style="background:${esc(h.color)}">${esc(h.word_text)}</span>
-                ${h.matched_text !== h.word_text ? `<br><span class="muted small">原文:${esc(h.matched_text)}</span>` : ""}</td>
-            <td class="sentence-cell">${markSentence(h.sentence, h.matched_text)}</td>
-          </tr>`).join("")}</tbody></table>`;
+      // 命中卡片同样展示完整字幕，违禁词只做高亮标注；
+      // 命中明细/勾选去除表格折叠在底部，不抢占完整字幕区域。
+      body = `<div class="subs-nohit subs-hits">
+        <div class="subs-head">
+          <span class="badge done">命中 ${v.hits.length} 处</span>
+          <span class="muted small">完整字幕已标注违禁词 · 点击任意句在播放器中复核</span>
+        </div>
+        <div class="subs-slot" data-subs-for="${v.id}"><div class="subs-loading muted small">加载字幕…</div></div>
+        <details class="hit-details">
+          <summary>查看 ${v.hits.length} 处命中，勾选要去除的片段</summary>
+          <table class="hit-table">
+            <thead><tr><th style="width:36px"><input type="checkbox" class="hit-check-all" data-vid="${v.id}" title="全选/取消全选"></th><th style="width:110px">时间点</th><th style="width:130px">违禁词</th><th>口播内容</th></tr></thead>
+            <tbody>${v.hits.map((h, i) => `
+              <tr class="clickable" data-vid="${v.id}" data-hidx="${i}">
+                <td><input type="checkbox" class="hit-check" data-vid="${v.id}" data-hid="${h.id}" ${state.cutSelection.has(h.id) ? "checked" : ""}></td>
+                <td><span class="time-link">▶ ${fmtTimeFine(h.start_ms)}</span></td>
+                <td><span class="word-tag" style="background:${esc(h.color)}">${esc(h.word_text)}</span>
+                    ${h.matched_text !== h.word_text ? `<br><span class="muted small">原文:${esc(h.matched_text)}</span>` : ""}</td>
+                <td class="sentence-cell">${markSentence(h.sentence, h.matched_text)}</td>
+              </tr>`).join("")}</tbody>
+          </table>
+        </details>
+      </div>`;
     }
 
     return `<div class="vcard" data-vid="${v.id}">
@@ -390,7 +436,7 @@ function renderVideoList(videos) {
 const subsCache = {};  // { videoId: [segments] }
 async function loadSubsForNoHit(videos) {
   const targets = videos.filter(
-    (v) => v.task_status === "done" && v.seg_count > 0 && !v.hits.length
+    (v) => v.task_status === "done" && v.seg_count > 0
   );
   if (!targets.length) return;
   await Promise.allSettled(targets.map((v) => ensureSubs(v.id)));
@@ -409,11 +455,13 @@ async function ensureSubs(vid) {
 function fillSubsSlot(vid, segments) {
   const slot = document.querySelector(`.subs-slot[data-subs-for="${vid}"]`);
   if (!slot || !segments.length) return;
-  slot.outerHTML = segments.map((s) => `
-    <div class="subs-row" data-vid="${vid}" data-ms="${s.start_ms}">
+  slot.outerHTML = segments.map((s) => {
+    const hits = s.hits || [];
+    return `<div class="subs-row${hits.length ? " has-hit" : ""}" data-vid="${vid}" data-ms="${s.start_ms}">
       <span class="t">${fmtTime(s.start_ms)}</span>
-      <span>${esc(s.text)}</span>
-    </div>`).join("");
+      <span>${markHitsInSentence(s.text, hits)}</span>
+    </div>`;
+  }).join("");
 }
 
 /* 卡片事件委托：播放定位 / 歌词行跳转 / 去词勾选 / 重测 / SRT / 删除 */
@@ -423,7 +471,9 @@ $("#videoList").addEventListener("click", async (e) => {
 
   const sub = e.target.closest(".subs-row");
   if (sub) {
-    openPlayerAt(Number(sub.dataset.vid), Number(sub.dataset.ms));
+    const mark = e.target.closest(".hit-mark");
+    const ms = mark && mark.dataset.ms ? Number(mark.dataset.ms) : Number(sub.dataset.ms);
+    openPlayerAt(Number(sub.dataset.vid), ms);
     return;
   }
   const row = e.target.closest("tr.clickable");
