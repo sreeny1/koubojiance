@@ -487,7 +487,7 @@ main { max-width: 1080px; margin: 0 auto; padding: 24px 24px 80px; }
 
 
 /* v1.8.1: full subtitles first; hits are marked inline and the hit table is collapsible. */
-.subs-head .badge.done { background: rgba(229, 57, 53, .10); color: var(--danger); }
+.subs-head .badge.hit { background: rgba(229, 57, 53, .10); color: var(--danger); }
 .subs-row.has-hit { background: rgba(229, 57, 53, .035); }
 .hit-mark {
   padding: 0 2px;

@@ -28,10 +28,10 @@ SETTINGS_PATH = DATA_DIR / "settings.json"
 
 # ---- 应用版本（每次发布更新此号；界面/日志/状态接口统一读取）----
 APP_NAME = "口播违禁词检测"
-APP_VERSION = "1.8.1"
+APP_VERSION = "1.8.2"
 
 # ---- 在线更新 ----
-# 仓库地址固定；latest.json 放 main 分支根目录，更新包放 GitHub Releases。
+# 仓库地址固定；latest.json 放 main 分支根目录，app 小包放 updates/ 随 main 发布（GitHub Releases 仅作备用）。
 UPDATE_REPO = "sreeny1/koubojiance"
 UPDATE_BRANCH = "main"
 UPDATE_MANIFEST_URL = (

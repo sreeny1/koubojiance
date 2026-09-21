@@ -1,13 +1,13 @@
 {
-    "version":  "1.8.1",
-    "published_at":  "2026-09-21T14:49:30+08:00",
-    "notes":  "v1.8.1: 命中卡片展示完整字幕，违禁词行内高亮标注；命中明细可折叠勾选去除",
+    "version":  "1.8.2",
+    "published_at":  "2026-09-21T15:06:37+08:00",
+    "notes":  "v1.8.2: 去除违禁词成功后原视频移入回收站，原目录不再留备份文件；修复命中卡片展示完整字幕与违禁词高亮",
     "assets":  {
                    "app":  {
-                               "name":  "koubo-app-v1.8.1.zip",
-                               "url":  "https://raw.githubusercontent.com/sreeny1/koubojiance/main/updates/koubo-app-v1.8.1.zip",
-                               "size":  178427,
-                               "sha256":  "a104b54cd17e1a2e856a5fb264fdf1f567c31993f830c6986738ef90957beaa6"
+                               "name":  "koubo-app-v1.8.2.zip",
+                               "url":  "https://raw.githubusercontent.com/sreeny1/koubojiance/main/updates/koubo-app-v1.8.2.zip",
+                               "size":  178750,
+                               "sha256":  "5b53d115c313518859994294b6025e617b524a8b056e1d84ca93a453d3713f01"
                            }
                }
 }

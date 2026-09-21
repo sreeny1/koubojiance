@@ -1,6 +1,6 @@
 # 口播违禁词检测
 
-> **当前版本：v1.8.1**（版本号见 `app/core/config.py` 的 `APP_VERSION`，界面顶栏同步显示；每次功能/修复发布递增）
+> **当前版本：v1.8.2**（版本号见 `app/core/config.py` 的 `APP_VERSION`，界面顶栏同步显示；每次功能/修复发布递增）
 
 > **转写与去词双核心优化（v1.8.0）**：转写统一先抽 16kHz 音轨（根治格式兼容导致的"转写不出来/漏段"），VAD 参数放宽（句首句尾不再被截断）+ 空结果自动关 VAD 重试；开启**词级时间戳**（命中定位精度 ±0.2s），去词真正剪到违禁词；切割产物**时长校验**——剪辑未生效时直接报错，绝不覆盖原文件。
 
@@ -112,6 +112,6 @@
 
 打包发布：`powershell -File scripts\pack_full.ps1`（生成绿色免安装包，模型首启自动下载）。
 
-在线更新发布：`powershell -File scripts\publish_update.ps1 -Version 1.8.0 -Notes "更新说明" -RepoHosted -Publish`（推荐，只需 Git 推送权限）。如果要同时生成本地完整绿色包，加 `-Full`；完整包放在 `build\updates`，用于首次从旧版升级或离线分发。
+在线更新发布：`powershell -File scripts\publish_update.ps1 -Version 1.8.2 -Notes "更新说明" -RepoHosted -Publish`（推荐，只需 Git 推送权限）。如果要同时生成本地完整绿色包，加 `-Full`；完整包放在 `build\updates`，用于首次从旧版升级或离线分发。
 
 开发文档见 `docs/开发文档.md`，过程记录见 `docs/开发日志.md`。

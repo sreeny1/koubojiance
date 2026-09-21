@@ -173,11 +173,12 @@ function markHitsInSentence(sentence, hits) {
   hits.forEach((h) => {
     const matched = h.matched_text || h.word_text || "";
     if (!matched) return;
+    const color = /^#[0-9a-fA-F]{6}$/.test(h.color || "") ? h.color : "#e53935";
     let from = 0;
     while (from <= sentence.length - matched.length) {
       const i = sentence.indexOf(matched, from);
       if (i < 0) break;
-      ranges.push({ s: i, e: i + matched.length, color: h.color || "#e53935",
+      ranges.push({ s: i, e: i + matched.length, color,
                     word: h.word_text || matched, ms: h.start_ms || 0 });
       from = i + Math.max(1, matched.length);
     }
@@ -390,7 +391,7 @@ function renderVideoList(videos) {
       // 命中明细/勾选去除表格折叠在底部，不抢占完整字幕区域。
       body = `<div class="subs-nohit subs-hits">
         <div class="subs-head">
-          <span class="badge done">命中 ${v.hits.length} 处</span>
+          <span class="badge hit">命中 ${v.hits.length} 处</span>
           <span class="muted small">完整字幕已标注违禁词 · 点击任意句在播放器中复核</span>
         </div>
         <div class="subs-slot" data-subs-for="${v.id}"><div class="subs-loading muted small">加载字幕…</div></div>
@@ -429,12 +430,12 @@ function renderVideoList(videos) {
     </div>`;
   }).join("");
   // 无命中卡片异步补齐字幕（已缓存则直接渲染，避免重复请求）
-  loadSubsForNoHit(videos);
+  loadSubsForCards(videos);
 }
 
 /* 为“无命中违禁词”的卡片加载完整字幕（供人工复核） */
 const subsCache = {};  // { videoId: [segments] }
-async function loadSubsForNoHit(videos) {
+async function loadSubsForCards(videos) {
   const targets = videos.filter(
     (v) => v.task_status === "done" && v.seg_count > 0
   );
@@ -583,7 +584,7 @@ async function pollCutJob() {
       hideCutBar();
       state.activeCut = null;
       if (job.status === "done") {
-        toast("去词完成，已自动重新检测" + (job.backup_path ? "（原文件已备份）" : ""));
+        toast("去词完成，已自动重新检测" + (job.backup_path ? "（原视频已移入回收站）" : ""));
       } else if (job.status === "error") {
         toast("去词失败：" + job.error, true);
       } else {

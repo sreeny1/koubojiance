@@ -21,7 +21,7 @@ from core.cutter import (
     replace_over_target,
 )
 from core.database import Database, get_db
-from core.media import probe_duration_ms
+from core.media import probe_duration_ms, send_to_recycle_bin
 
 log = logging.getLogger("cut_tasks")
 
@@ -151,6 +151,18 @@ class CutManager:
             )
             if not tmp.is_file() or tmp.stat().st_size == 0:
                 raise RuntimeError("切割产物为空")
+            # 原视频先移入回收站（最终不在原目录留下备份文件）；
+            # 移入失败则中止，绝不覆盖原文件。
+            if backup is None or not send_to_recycle_bin(backup):
+                raise RuntimeError(
+                    "原视频移入回收站失败（可能被占用或权限不足），"
+                    "已取消覆盖，原文件未改动。"
+                )
+            log.info("原视频已移入回收站: %s", backup)
+            self.db.execute(
+                "UPDATE cut_jobs SET backup_path=? WHERE id=?",
+                (f"回收站:{backup.name}", job_id),
+            )
             # 覆盖原名（清只读 + 重试；被占用时给出明确提示，避免 WinError 5）
             replace_over_target(tmp, src)
             replaced = True
@@ -158,11 +170,17 @@ class CutManager:
             self._finish(job_id, "done", None)
             self._requeue_transcribe(job["video_id"])
             log.info(
-                "去词任务 #%s 完成：%s（去除 %d 个区间，备份 %s）",
-                job_id, video["filename"], len(ranges), backup,
+                "去词任务 #%s 完成：%s（去除 %d 个区间，原视频已移入回收站）",
+                job_id, video["filename"], len(ranges),
             )
         except CutCanceled:
             tmp.unlink(missing_ok=True)
+            if backup is not None and backup.exists():
+                try:
+                    backup.unlink(missing_ok=True)
+                    log.info("已取消，原文件未改动，清理临时备份: %s", backup)
+                except OSError:
+                    pass
             log.info("去词任务 #%s 被用户取消: %s", job_id, video["filename"])
             self._finish(job_id, "canceled", "用户取消")
         except Exception as e:  # noqa: BLE001
