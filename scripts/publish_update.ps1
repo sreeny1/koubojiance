@@ -6,10 +6,10 @@
 #   5. optionally commit, push and create GitHub Release with gh
 #
 # Usage:
-#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\publish_update.ps1 -Version 1.8.2 -Notes "fix xxx"
-#   powershell ... -Version 1.8.2 -Notes "fix xxx" -Full
-#   powershell ... -Version 1.8.2 -Notes "fix xxx" -RepoHosted -Publish
-#   powershell ... -Version 1.8.2 -Notes "fix xxx" -Full -Publish
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\publish_update.ps1 -Version 1.8.3 -Notes "fix xxx"
+#   powershell ... -Version 1.8.3 -Notes "fix xxx" -Full
+#   powershell ... -Version 1.8.3 -Notes "fix xxx" -RepoHosted -Publish
+#   powershell ... -Version 1.8.3 -Notes "fix xxx" -Full -Publish
 #
 # ASCII-ONLY: PowerShell 5.1 on Chinese Windows parses BOM-less scripts as GBK.
 param(

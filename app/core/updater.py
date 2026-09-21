@@ -438,14 +438,16 @@ def launch_apply_helper() -> None:
         "-Root", str(config.BASE_DIR),
         "-Pending", str(config.UPDATE_PENDING_PATH),
         "-WaitPid", str(os.getpid()),
-        "-RestartExe", exe,
-        "-RestartBat", bat,
     ]
+    # 只传非空可选参数；PowerShell -File 显式收到空字符串会在写日志前退出
+    if exe:
+        cmd += ["-RestartExe", exe]
+    if bat:
+        cmd += ["-RestartBat", bat]
     creationflags = 0
     if os.name == "nt":
         creationflags = (
             getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            | getattr(subprocess, "DETACHED_PROCESS", 0)
             | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
         )
     log.info("启动更新辅助脚本: %s", cmd)

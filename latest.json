@@ -1,13 +1,13 @@
 {
-    "version":  "1.8.2",
-    "published_at":  "2026-09-21T15:06:37+08:00",
-    "notes":  "v1.8.2: 去除违禁词成功后原视频移入回收站，原目录不再留备份文件；修复命中卡片展示完整字幕与违禁词高亮",
+    "version":  "1.8.3",
+    "published_at":  "2026-09-21T16:22:01+08:00",
+    "notes":  "v1.8.3: 修复自动更新安装后不重启的问题（空参数/DETACHED_PROCESS）；去词成功后原视频移入回收站",
     "assets":  {
                    "app":  {
-                               "name":  "koubo-app-v1.8.2.zip",
-                               "url":  "https://raw.githubusercontent.com/sreeny1/koubojiance/main/updates/koubo-app-v1.8.2.zip",
-                               "size":  178750,
-                               "sha256":  "5b53d115c313518859994294b6025e617b524a8b056e1d84ca93a453d3713f01"
+                               "name":  "koubo-app-v1.8.3.zip",
+                               "url":  "https://raw.githubusercontent.com/sreeny1/koubojiance/main/updates/koubo-app-v1.8.3.zip",
+                               "size":  178857,
+                               "sha256":  "c8a9245fb8f794d23d9274984bc3c21a6286d3d95d2afee4ae18853b66fad344"
                            }
                }
 }
