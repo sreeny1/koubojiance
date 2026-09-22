@@ -54,6 +54,47 @@ class TranscriptionCanceled(Exception):
     """用户取消了转写任务。"""
 
 
+# ----------------------------------------------------------------------
+# 幻觉字幕过滤（whisper 对纯音乐/无语音音频的知名问题）
+#
+# whisper 训练数据含大量 YouTube 字幕署名，对无人声/纯 BGM 音频会
+# "幻觉"输出这些固定文本（社区广泛报告，见 openai/whisper#791 等）：
+#   "字幕由 Amara.org 社群提供"、"请不吝点赞 订阅 转发 打赏支持明镜与点点栏目"、
+#   "中文字幕提供"、"MING PAO ..."、"Thanks for watching" 等。
+# 识别策略（保守，避免误删真实口播）：
+#   1. 归一化（去空白/小写）后子串命中已知幻觉短语，且整句 ≤40 字；
+#   2. 极短句（≤12 字）+ no_speech_prob ≥ 0.9（音乐段典型幻觉信号）。
+# ----------------------------------------------------------------------
+import re as _re
+
+_HALLUCINATION_SUBSTRINGS: tuple[str, ...] = (
+    # 字幕署名 / 社区字幕
+    "amara.org", "字幕由", "字幕提供", "中文字幕", "字幕制作", "字幕製作",
+    "subtitlesby", "subtitlesbythe", "translatedby",
+    # YouTube 水印类（whisper 中文圈高频幻觉）
+    "请不吝点赞", "請不吝點讚", "点赞订阅", "點讚訂閱", "订阅转发", "訂閱轉發",
+    "打赏支持", "打賞支持", "明镜与点点", "明鏡與點點",
+    "mingpao", "明报", "明報",
+    # 英文常见幻觉署名
+    "thanksforwatching", "thankyouforwatching",
+)
+
+
+def _is_hallucination(text: str, no_speech_prob: float = 0.0) -> bool:
+    """判断一条字幕是否为 whisper 幻觉（字幕署名/平台水印类）。"""
+    t = _re.sub(r"\s+", "", text or "").lower()
+    if not t:
+        return True
+    if len(t) > 40:
+        return False  # 长句视为真实口播，不做幻觉判定
+    if any(p in t for p in _HALLUCINATION_SUBSTRINGS):
+        return True
+    # 极短句 + 高无语音概率：音乐/无人声段的典型幻觉信号
+    if len(t) <= 12 and no_speech_prob >= 0.9:
+        return True
+    return False
+
+
 class WhisperEngine:
     """单例转写引擎：懒加载模型，线程安全。"""
 
@@ -407,7 +448,8 @@ class WhisperEngine:
         lang = self._settings.get("language", "zh")
 
         def _run(vad: bool) -> tuple[list[dict], float]:
-            """执行一次推理，返回 (字幕段列表, 检测到的音频时长秒)。"""
+            """执行一次推理，返回 (原始字幕段列表, 检测到的音频时长秒)。
+            段含 no_speech_prob 供幻觉过滤，不入库。"""
             kwargs: dict = dict(
                 language=None if lang == "auto" else lang,
                 beam_size=5,
@@ -437,26 +479,39 @@ class WhisperEngine:
                 text = seg.text.strip()
                 words = align_words(text, getattr(seg, "words", None))
                 out.append({"start": seg.start, "end": seg.end,
-                            "text": text, "words": words})
+                            "text": text, "words": words,
+                            "no_speech_prob": float(getattr(seg, "no_speech_prob", 0) or 0)})
                 if progress and duration > 0:
                     progress(min(0.99, seg.end * 1000 / duration))
             log.info("whisper 推理完成: %s → %d 段（vad=%s，耗时 %.1fs）",
                      Path(path).name, len(out), vad, time.monotonic() - t0)
             return out, float(info.duration or 0)
 
-        result, run_dur = _run(vad=True)
+        raw, run_dur = _run(vad=True)
         if not duration and run_dur:
             duration = int(run_dur * 1000)
 
         # 空结果兜底：VAD 可能把 BGM 大/音量低的整段口播全部过滤掉
         #（"整段转写不出来"的主要根因）→ 关闭 VAD 再试一次。
-        if not result:
+        # 注意：只对"VAD 全滤空"重试；"有产出但全是幻觉"说明音频本身
+        # 无人声（纯音乐/BGM），重试只会产生更多幻觉，直接过滤为空。
+        if not raw:
             log.warning("VAD 过滤后无任何字幕段，关闭 VAD 重试: %s", path)
             _had_duration = duration
-            result, run_dur = _run(vad=False)
+            raw, run_dur = _run(vad=False)
             if not _had_duration and run_dur:
                 duration = int(run_dur * 1000)
 
+        # 幻觉字幕过滤：纯音乐/无人声视频里 whisper 输出的字幕署名水印
+        #（"字幕由 Amara.org 社群提供"等）不进结果，界面显示"未检测到人声"
+        result = [s for s in raw
+                  if not _is_hallucination(s["text"], s.get("no_speech_prob", 0))]
+        dropped = len(raw) - len(result)
+        if dropped:
+            log.info("已过滤 %d 条幻觉字幕（无人声水印/字幕署名）: %s → 保留 %d 段",
+                     dropped, Path(path).name, len(result))
+        for s in result:
+            s.pop("no_speech_prob", None)  # 内部字段不入库
         if progress:
             progress(1.0)
         return result

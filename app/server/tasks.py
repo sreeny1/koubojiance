@@ -44,6 +44,7 @@ class TaskManager:
         self._dl_state: dict = {"active": False, "name": None, "frac": 0.0}
         self._dl_error: str | None = None
         self._recover_orphans()
+        self._purge_hallucination_segments()
         self._start_model_predownload()
         self._start_workers()
 
@@ -177,6 +178,30 @@ class TaskManager:
             self._queue.put(r["id"])
         if rows:
             log.info("断点恢复：重新入队 %d 个任务", len(rows))
+
+    def _purge_hallucination_segments(self) -> None:
+        """清理历史数据中的幻觉字幕句（v1.8.4 前转写的水印文本）。
+
+        幻觉句被删后：命中随外键级联删除；视频若变 0 段，
+        界面自动显示「未检测到人声」。幂等，启动时跑一次。
+        """
+        try:
+            from core.transcriber import _is_hallucination
+
+            rows = self.db.query(
+                "SELECT id, video_id, text FROM segments"
+            )
+            bad_ids = [r["id"] for r in rows
+                       if _is_hallucination(r["text"], 0.0)]
+            if not bad_ids:
+                return
+            ph = ",".join("?" * len(bad_ids))
+            with self.db.tx() as conn:
+                conn.execute(f"DELETE FROM segments WHERE id IN ({ph})", bad_ids)
+            # 顺带清掉转写结果为空的视频的 duration 陈旧标记（无段则显示未检测到人声）
+            log.info("已清理 %d 条历史幻觉字幕（无人声水印/字幕署名）", len(bad_ids))
+        except Exception:  # noqa: BLE001  清理失败不阻断启动
+            log.exception("历史幻觉字幕清理失败（忽略）")
 
     def _start_workers(self) -> None:
         n = max(1, int(self.settings.get("max_workers", 1)))

@@ -6,7 +6,7 @@
 <title>口播违禁词检测</title>
 <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
 <link rel="apple-touch-icon" href="/static/logo.png">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v={{APP_VERSION}}">
 </head>
 <body>
 
@@ -191,7 +191,7 @@
     </div>
     <div class="panel">
       <h3>在线更新</h3>
-      <div id="updateInfo" class="engine-info">当前版本 v1.8.3；点击「检查更新」获取最新版本。</div>
+      <div id="updateInfo" class="engine-info">当前版本 v1.8.4；点击「检查更新」获取最新版本。</div>
       <div class="form-grid">
         <label class="wide"><input type="checkbox" id="setAutoUpdate"> 启动后自动检查更新（只检查，不自动安装）</label>
         <label class="wide"><input type="checkbox" id="setUpdateMirror"> 直连 GitHub 失败时使用国内镜像加速下载</label>
@@ -268,6 +268,6 @@
 <div id="busy" class="busy" hidden><div class="spinner"></div><div id="busyText">处理中…</div></div>
 <div id="gtip" class="gtip" hidden></div>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v={{APP_VERSION}}"></script>
 </body>
 </html>

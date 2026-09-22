@@ -42,7 +42,7 @@ from core.config import (  # noqa: E402
 
 import uvicorn  # noqa: E402
 from fastapi import FastAPI, Request  # noqa: E402
-from fastapi.responses import FileResponse  # noqa: E402
+from fastapi.responses import FileResponse, HTMLResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 from core.database import init_db  # noqa: E402
@@ -196,8 +196,14 @@ def create_app() -> FastAPI:
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(str(BASE / "web" / "index.html"))
+    def index() -> HTMLResponse:
+        """首页：注入版本号做静态资源缓存击穿（OTA 覆盖 app/ 后，
+        ?v=版本号 变化强制 WebView2/浏览器重新拉取 JS/CSS，
+        根治"更新成功但界面还是旧布局"的缓存问题）。
+        页面本身禁缓存（no-store），保证版本注入始终生效。"""
+        html = (BASE / "web" / "index.html").read_text(encoding="utf-8")
+        html = html.replace("{{APP_VERSION}}", APP_VERSION)
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     return app
 

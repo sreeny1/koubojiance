@@ -376,7 +376,7 @@ function renderVideoList(videos) {
     } else if (status === "error") {
       body = `<div class="empty-hint err-text">转写失败，请点击右上角「重测」重试</div>`;
     } else if (!v.seg_count) {
-      body = `<div class="empty-hint muted">未识别到语音内容（可能是纯音乐/无人声）</div>`;
+      body = `<div class="empty-hint muted">未检测到人声（纯音乐 / 无人声 / 无有效语音）</div>`;
     } else if (!v.hits.length) {
       // 无命中：展示完整字幕（弱化展示），便于人工二次复核
       body = `<div class="subs-nohit">
@@ -422,7 +422,7 @@ function renderVideoList(videos) {
         <span class="badge ${status}">${statusText}</span>
         ${v.file_deleted ? "" : `<button class="btn btn-xs" data-act="retest" data-tip="重新转写并检测该视频">重测</button>`}
         ${v.seg_count ? `<button class="btn btn-xs" data-act="srt" data-tip="下载该视频的 SRT 字幕文件">SRT</button>` : ""}
-        ${v.hits.length && !v.file_deleted && (v.path || "").toLowerCase().endsWith(".mp4") ? `<button class="btn btn-xs btn-primary" data-act="cut" data-tip="去除勾选的违禁词片段：原文件自动备份到同目录，成品文件名不变（仅 mp4）">去除所选</button>` : ""}
+        ${v.hits.length && !v.file_deleted && (v.path || "").toLowerCase().endsWith(".mp4") ? `<button class="btn btn-xs btn-primary" data-act="cut" data-tip="去除勾选的违禁词片段：原视频移入回收站（可恢复），成品文件名不变（仅 mp4）">去除所选</button>` : ""}
         <button class="btn btn-xs btn-danger" data-act="del" data-tip="删除该视频的检测记录（不删除磁盘上的视频文件，字幕/命中一并删除）">删除</button>
         ${v.file_deleted ? `<button class="btn btn-xs" data-act="delfile" disabled title="文件已删除">文件已删除</button>` : `<button class="btn btn-xs btn-danger" data-act="delfile" data-tip="把该视频文件移入回收站（可恢复），转写记录保留并标记">删除文件</button>`}
       </div>
@@ -433,23 +433,26 @@ function renderVideoList(videos) {
   loadSubsForCards(videos);
 }
 
-/* 为“无命中违禁词”的卡片加载完整字幕（供人工复核） */
-const subsCache = {};  // { videoId: [segments] }
+/* 为卡片加载完整字幕（供人工复核）。
+   缓存以 transcribed_at 为准：去词/重测后重新转写会更新该时间戳，
+   自动失效旧字幕，避免界面残留转写前的内容。 */
+const subsCache = {};  // { videoId: { segs, at } }  at = transcribed_at
 async function loadSubsForCards(videos) {
   const targets = videos.filter(
     (v) => v.task_status === "done" && v.seg_count > 0
   );
   if (!targets.length) return;
-  await Promise.allSettled(targets.map((v) => ensureSubs(v.id)));
+  await Promise.allSettled(targets.map((v) => ensureSubs(v.id, v.transcribed_at)));
 }
-async function ensureSubs(vid) {
-  if (subsCache[vid]) {
-    fillSubsSlot(vid, subsCache[vid]);
+async function ensureSubs(vid, at) {
+  const c = subsCache[vid];
+  if (c && c.at === at) {
+    fillSubsSlot(vid, c.segs);
     return;
   }
   try {
     const data = await api("GET", `/api/videos/${vid}/subtitles`);
-    subsCache[vid] = data.segments;
+    subsCache[vid] = { segs: data.segments, at };
     fillSubsSlot(vid, data.segments);
   } catch (_) { /* 忽略：下次刷新重试 */ }
 }
@@ -544,7 +547,7 @@ async function cutSelected(vid) {
   if (!hids.length) { toast("请先勾选要去除的违禁词", true); return; }
   const ok = confirm(
     `将去除 ${hids.length} 处命中对应的画面和声音片段（命中前后各 0.3 秒）。\n\n` +
-    `· 原视频会先备份到视频所在文件夹\n` +
+    `· 原视频会移入回收站（可恢复），原目录不保留备份\n` +
     `· 成品文件名保持不变\n` +
     `· 去词后会自动重新检测一次\n\n确认开始？`
   );
