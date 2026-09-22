@@ -1,13 +1,13 @@
 {
-    "version":  "1.8.3",
-    "published_at":  "2026-09-21T16:22:01+08:00",
-    "notes":  "v1.8.3: 修复自动更新安装后不重启的问题（空参数/DETACHED_PROCESS）；去词成功后原视频移入回收站",
+    "version":  "1.8.4",
+    "published_at":  "2026-09-22T12:02:30+08:00",
+    "notes":  "v1.8.4: 修复更新后界面仍显示旧布局的问题；过滤无人声视频的幻觉字幕（如字幕由Amara.org提供），改为显示未检测到人声；去词或重测后字幕自动刷新",
     "assets":  {
                    "app":  {
-                               "name":  "koubo-app-v1.8.3.zip",
-                               "url":  "https://raw.githubusercontent.com/sreeny1/koubojiance/main/updates/koubo-app-v1.8.3.zip",
-                               "size":  178857,
-                               "sha256":  "c8a9245fb8f794d23d9274984bc3c21a6286d3d95d2afee4ae18853b66fad344"
+                               "name":  "koubo-app-v1.8.4.zip",
+                               "url":  "https://raw.githubusercontent.com/sreeny1/koubojiance/main/updates/koubo-app-v1.8.4.zip",
+                               "size":  180884,
+                               "sha256":  "1f69a1164fb0fc338323bbc67fa33caeb29d61a7f615d4e9e6513b488d607164"
                            }
                }
 }
